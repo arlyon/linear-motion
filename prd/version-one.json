@@ -1,0 +1,186 @@
+{
+  "productName": "Linear-Motion Sync Tool",
+  "version": "1.0",
+  "documentDate": "2025-09-07",
+  "overview": "A command-line microservice to automate the synchronization of tasks from Linear projects into a user's Motion calendar, designed for individual developers to improve personal productivity.",
+  "goals": [
+    {
+      "goalId": "G1",
+      "description": "Eliminate manual effort in synchronizing Linear issues with a personal Motion calendar."
+    },
+    {
+      "goalId": "G2",
+      "description": "Provide a reliable, fault-tolerant, and configurable sync process that runs in the background."
+    },
+    {
+      "goalId": "G3",
+      "description": "Ensure bidirectional status updates for completed tasks to create a closed-loop workflow."
+    }
+  ],
+  "targetAudience": {
+    "primary": "Individual software developers, engineers, and product managers.",
+    "characteristics": [
+      "Uses Linear for team projects and Motion for personal task management.",
+      "Comfortable with CLI tools and JSON configuration.",
+      "Values automation and personal productivity."
+    ]
+  },
+  "functionalRequirements": [
+    {
+      "reqId": "FR-CONF-01",
+      "component": "Configuration",
+      "description": "Tool must be configured via a single `config.json` file.",
+      "acceptanceCriteria": [
+        "A `sync-tool init` command exists and generates a valid JSON template.",
+        "The tool correctly parses global and per-source settings."
+      ]
+    },
+    {
+      "reqId": "FR-CONF-02",
+      "component": "Configuration",
+      "description": "Configuration must support multiple sync sources, each with a Linear API key and project list.",
+      "acceptanceCriteria": [
+        "The `sync_sources` array is correctly parsed and processed.",
+        "Each source can have its own sync strategy (webhook/poll)."
+      ]
+    },
+    {
+      "reqId": "FR-CONF-03",
+      "component": "Configuration",
+      "description": "Configuration must support global `sync_rules` that can be overridden on a per-source basis.",
+      "acceptanceCriteria": [
+        "Per-source rules correctly merge with and override global rules.",
+        "Settings like `default_task_duration_mins` and `completed_linear_tag` are applied correctly."
+      ]
+    },
+    {
+      "reqId": "FR-SYNC-01",
+      "component": "Sync Logic",
+      "description": "On startup, an idempotent sync of all open, assigned Linear issues must be performed.",
+      "acceptanceCriteria": [
+        "Running the tool multiple times does not create duplicate tasks in Motion.",
+        "All relevant existing issues are present in Motion after the first run."
+      ]
+    },
+    {
+      "reqId": "FR-SYNC-02",
+      "component": "Sync Logic",
+      "description": "Linear issue time estimates must be converted to Motion task durations based on a flexible strategy mapping.",
+      "acceptanceCriteria": [
+        "The tool correctly identifies the estimation type used by a Linear team.",
+        "Fibonacci, T-Shirt, and points-based estimates are converted to the correct minute duration in Motion."
+      ]
+    },
+    {
+      "reqId": "FR-SYNC-03",
+      "component": "Sync Logic",
+      "description": "When a synced task is completed in Motion, a specified tag must be applied to the corresponding Linear issue.",
+      "acceptanceCriteria": [
+        "The tool polls Motion for completed tasks.",
+        "The correct tag is applied in Linear.",
+        "The ID mapping is removed from the local database upon successful tagging."
+      ]
+    },
+    {
+      "reqId": "FR-STATE-01",
+      "component": "State Management",
+      "description": "If the completion tag is removed from a Linear issue, the tool must re-sync it as a new task.",
+      "acceptanceCriteria": [
+        "The absence of the tag and the local DB mapping triggers a re-sync.",
+        "A new task is created in Motion."
+      ]
+    },
+    {
+      "reqId": "FR-STATE-02",
+      "component": "State Management",
+      "description": "If a Linear issue is set to 'Done' or 'Canceled', the Motion task is marked as complete, not deleted.",
+      "acceptanceCriteria": [
+        "The task remains on the user's Motion calendar in a completed state."
+      ]
+    },
+    {
+      "reqId": "FR-CLI-01",
+      "component": "CLI",
+      "description": "The tool must support `init`, `sync`, `sync --watch`, and `status` commands.",
+      "acceptanceCriteria": [
+        "`sync` runs once and exits, printing errors inline.",
+        "`sync --watch` starts a persistent daemon process.",
+        "`status` communicates with the daemon via IPC to fetch and display status."
+      ]
+    }
+  ],
+  "nonFunctionalRequirements": [
+    {
+      "reqId": "NFR-REL-01",
+      "category": "Reliability",
+      "description": "The tool must be fault-tolerant. Failure to process one source must not impact others. All errors must be logged to a queryable status table."
+    },
+    {
+      "reqId": "NFR-PERF-01",
+      "category": "Performance",
+      "description": "The tool must adhere to Linear and Motion API rate limits. Polling frequencies must be configurable."
+    },
+    {
+      "reqId": "NFR-SEC-01",
+      "category": "Security",
+      "description": "API keys are stored in `config.json`. The user is responsible for file permissions. No OS keychain integration is required for v1.0."
+    }
+  ],
+  "technicalAppendix": {
+    "notes": "This appendix provides high-level pointers for implementation within a hypothetical Rust codebase.",
+    "sections": [
+      {
+        "feature": "Configuration Loading",
+        "description": "Logic for parsing `config.json`, including the global and per-source override for `sync_rules`.",
+        "filePointers": [
+          "src/config/mod.rs#L15-L40",
+          "src/config/models.rs#L10-L80"
+        ]
+      },
+      {
+        "feature": "CLI Command Parsing",
+        "description": "Implementation of the clap or similar library to handle the `init`, `sync`, `sync --watch`, and `status` commands.",
+        "filePointers": [
+          "src/main.rs#L25-L70",
+          "src/cli.rs#L5-L50"
+        ]
+      },
+      {
+        "feature": "Sync Orchestrator",
+        "description": "The main loop that iterates through sync sources and triggers the appropriate strategy (poll/webhook). Handles fault tolerance.",
+        "filePointers": [
+          "src/sync/orchestrator.rs#L50-L150"
+        ]
+      },
+      {
+        "feature": "Linear API Client",
+        "description": "GraphQL client for fetching issues, updating tags, and auto-configuring webhooks.",
+        "filePointers": [
+          "src/clients/linear.rs#L30-L200"
+        ]
+      },
+      {
+        "feature": "Motion API Client",
+        "description": "REST client for creating, updating, and polling tasks.",
+        "filePointers": [
+          "src/clients/motion.rs#L25-L180"
+        ]
+      },
+      {
+        "feature": "Database Interaction",
+        "description": "Wrapper for `fjall` DB. Manages the ID mapping table and the error/status tracking table.",
+        "filePointers": [
+          "src/db/mod.rs#L10-L100"
+        ]
+      },
+      {
+        "feature": "IPC for Status Command",
+        "description": "Implementation of the IPC server (in the daemon) and client (in the `status` command handler) for querying runtime state.",
+        "filePointers": [
+          "src/ipc/server.rs#L20-L80",
+          "src/ipc/client.rs#L15-L60"
+        ]
+      }
+    ]
+  }
+}
