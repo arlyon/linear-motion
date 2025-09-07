@@ -43,5 +43,5 @@ impl SyncDatabase {
     }
 }
 
-pub use mapping::TaskMapping;
+pub use mapping::{TaskMapping, MappingStatus};
 pub use status::{SyncStatus, SyncStatusEntry, SyncSourceStatus};

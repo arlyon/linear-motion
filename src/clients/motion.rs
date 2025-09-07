@@ -7,7 +7,70 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
+
+#[derive(Debug, Clone)]
+pub enum TaskDuration {
+    None,
+    Reminder,
+    Minutes(u32),
+}
+
+impl Serialize for TaskDuration {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            TaskDuration::None => serializer.serialize_str("NONE"),
+            TaskDuration::Reminder => serializer.serialize_str("REMINDER"),
+            TaskDuration::Minutes(m) => serializer.serialize_u32(*m),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskDuration {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        match value {
+            serde_json::Value::String(s) => match s.as_str() {
+                "NONE" => Ok(TaskDuration::None),
+                "REMINDER" => Ok(TaskDuration::Reminder),
+                _ => Err(D::Error::custom(format!("Invalid duration string: {}", s))),
+            },
+            serde_json::Value::Number(n) => {
+                if let Some(minutes) = n.as_u64() {
+                    Ok(TaskDuration::Minutes(minutes as u32))
+                } else {
+                    Err(D::Error::custom("Invalid duration number"))
+                }
+            }
+            _ => Err(D::Error::custom("Duration must be a string or number")),
+        }
+    }
+}
+
+impl TaskDuration {
+    pub fn from_minutes(minutes: u32) -> Self {
+        if minutes == 0 {
+            TaskDuration::None
+        } else {
+            TaskDuration::Minutes(minutes)
+        }
+    }
+}
+
+impl From<u32> for TaskDuration {
+    fn from(minutes: u32) -> Self {
+        TaskDuration::from_minutes(minutes)
+    }
+}
 
 #[derive(Debug)]
 pub struct MotionClient {
@@ -19,31 +82,64 @@ pub struct MotionClient {
         governor::state::InMemoryState,
         governor::clock::DefaultClock,
     >,
+    cached_workspaces: Arc<Mutex<Option<Vec<MotionWorkspace>>>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Status {
+    pub name: String,
+    pub isDefaultStatus: bool,
+    pub isResolvedStatus: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Label {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AutoScheduled {
+    pub startDate: Option<DateTime<Utc>>,
+    /// HARD SOFT NONE
+    pub deadlineType: String,
+    /// Work Hours
+    pub schedule: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MotionTask {
     pub id: Option<String>,
     pub name: String,
     pub description: Option<String>,
-    pub workspace_id: String,
     pub assignee_id: Option<String>,
+    #[serde(rename = "project")]
     pub project_id: Option<String>,
     pub priority: Option<String>, // "ASAP", "HIGH", "MEDIUM", "LOW"
+    #[serde(rename = "dueDate")]
     pub due_date: Option<DateTime<Utc>>,
-    pub duration: Option<String>, // "NONE", "REMINDER", or minutes as string
-    pub status: Option<String>,
+    pub duration: Option<TaskDuration>,
+    pub status: Option<Status>,
     pub completed: Option<bool>,
-    pub labels: Option<Vec<String>>,
+    pub labels: Option<Vec<Label>>,
+    #[serde(rename = "createdTime")]
     pub created_time: Option<DateTime<Utc>>,
+    #[serde(rename = "updatedTime")]
     pub updated_time: Option<DateTime<Utc>>,
+    // Additional fields from the API response that we don't currently use
+    pub creator: Option<MotionUser>,
+    pub workspace: Option<MotionWorkspace>,
+    pub assignees: Option<Vec<MotionUser>>,
+    #[serde(rename = "autoScheduled")]
+    pub auto_scheduled: Option<AutoScheduled>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MotionWorkspace {
     pub id: String,
     pub name: String,
-    pub team_id: String,
+    #[serde(rename = "teamId")]
+    pub team_id: Option<String>,
+    #[serde(rename = "type")]
     pub workspace_type: String, // "team" or "individual"
 }
 
@@ -52,6 +148,14 @@ pub struct MotionUser {
     pub id: String,
     pub name: String,
     pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MotionLabel {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "colorHex")]
+    pub color_hex: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +182,13 @@ struct TaskListResponse {
 #[derive(Debug, Deserialize)]
 struct WorkspaceListResponse {
     workspaces: Vec<MotionWorkspace>,
-    meta: MotionMeta,
+    meta: Option<MotionMeta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelListResponse {
+    labels: Vec<MotionLabel>,
+    meta: Option<MotionMeta>,
 }
 
 impl MotionClient {
@@ -89,8 +199,8 @@ impl MotionClient {
         let client = Client::builder().default_headers(headers).build()?;
 
         // Motion rate limit: 12 requests per minute for individuals, 120 for teams
-        // We'll be conservative and use 10 requests per minute
-        let quota = Quota::per_minute(NonZeroU32::new(10).unwrap());
+        // We'll use exactly 12 requests per minute for individuals
+        let quota = Quota::per_minute(NonZeroU32::new(12).unwrap());
         let rate_limiter = RateLimiter::direct(quota);
 
         Ok(Self {
@@ -98,6 +208,7 @@ impl MotionClient {
             api_key,
             base_url: "https://api.usemotion.com/v1".to_string(),
             rate_limiter,
+            cached_workspaces: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -123,11 +234,17 @@ impl MotionClient {
             });
         }
 
-        let response_data: T = response.json().await?;
+        let text = response.text().await?;
+        debug!("Motion API response: {}", text);
+
+        let response_data: T = {
+            let deserializer = &mut serde_json::Deserializer::from_str(&text);
+            serde_path_to_error::deserialize(deserializer)?
+        };
         Ok(response_data)
     }
 
-    async fn make_post_request<T: for<'de> Deserialize<'de>, B: Serialize>(
+    async fn make_post_request<T: for<'de> Deserialize<'de>, B: Serialize + std::fmt::Debug>(
         &self,
         endpoint: &str,
         body: &B,
@@ -135,7 +252,11 @@ impl MotionClient {
         self.rate_limit().await?;
 
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
-        debug!("Making Motion API request: POST {}", url);
+        info!(
+            "Making Motion API request: POST {} {:?}",
+            url,
+            serde_json::to_string(&body)
+        );
 
         let response = self.client.post(&url).json(body).send().await?;
 
@@ -148,7 +269,21 @@ impl MotionClient {
             });
         }
 
-        let response_data: T = response.json().await?;
+        let text = response.text().await?;
+        debug!("Motion API response: {}", text);
+
+        let response_data: T = {
+            let deserializer = &mut serde_json::Deserializer::from_str(&text);
+            match serde_path_to_error::deserialize(deserializer) {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to parse Motion POST response: {}", e);
+                    error!("Response body was: {}", text);
+                    return Err(Error::Json(e.into_inner()));
+                }
+            }
+        };
+
         Ok(response_data)
     }
 
@@ -184,15 +319,32 @@ impl MotionClient {
     }
 
     pub async fn list_workspaces(&self) -> Result<Vec<MotionWorkspace>> {
+        // Check cache first
+        {
+            let cache = self.cached_workspaces.lock().unwrap();
+            if let Some(ref workspaces) = *cache {
+                debug!("Using cached Motion workspaces ({})", workspaces.len());
+                return Ok(workspaces.clone());
+            }
+        }
+
+        // Cache miss - fetch from API
         let response: WorkspaceListResponse = self.make_request("workspaces").await?;
         info!("Found {} Motion workspaces", response.workspaces.len());
+
+        // Store in cache
+        {
+            let mut cache = self.cached_workspaces.lock().unwrap();
+            *cache = Some(response.workspaces.clone());
+        }
+
         Ok(response.workspaces)
     }
 
     pub async fn create_task(&self, task: &MotionTask) -> Result<MotionTask> {
         debug!("Creating Motion task: {}", task.name);
 
-        #[derive(Serialize)]
+        #[derive(Serialize, Debug)]
         struct CreateTaskRequest {
             name: String,
             #[serde(rename = "workspaceId")]
@@ -208,21 +360,28 @@ impl MotionClient {
             #[serde(rename = "dueDate", skip_serializing_if = "Option::is_none")]
             due_date: Option<DateTime<Utc>>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            duration: Option<String>,
+            duration: Option<TaskDuration>,
             #[serde(skip_serializing_if = "Option::is_none")]
             labels: Option<Vec<String>>,
         }
 
         let request = CreateTaskRequest {
             name: task.name.clone(),
-            workspace_id: task.workspace_id.clone(),
+            workspace_id: task
+                .workspace
+                .as_ref()
+                .map(|w| w.id.to_owned())
+                .expect("workspace"),
             description: task.description.clone(),
             assignee_id: task.assignee_id.clone(),
             project_id: task.project_id.clone(),
             priority: task.priority.clone(),
             due_date: task.due_date,
             duration: task.duration.clone(),
-            labels: task.labels.clone(),
+            labels: task
+                .labels
+                .clone()
+                .map(|l| l.into_iter().map(|l| l.name).collect()),
         };
 
         let created_task: MotionTask = self.make_post_request("tasks", &request).await?;
@@ -248,7 +407,7 @@ impl MotionClient {
             #[serde(rename = "dueDate", skip_serializing_if = "Option::is_none")]
             due_date: Option<DateTime<Utc>>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            duration: Option<String>,
+            duration: Option<TaskDuration>,
             #[serde(skip_serializing_if = "Option::is_none")]
             status: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,8 +420,11 @@ impl MotionClient {
             priority: task.priority.clone(),
             due_date: task.due_date,
             duration: task.duration.clone(),
-            status: task.status.clone(),
-            labels: task.labels.clone(),
+            status: task.status.as_ref().map(|s| s.name.clone()),
+            labels: task
+                .labels
+                .clone()
+                .map(|l| l.into_iter().map(|l| l.name).collect()),
         };
 
         let endpoint = format!("tasks/{}", task_id);
@@ -311,5 +473,92 @@ impl MotionClient {
         let updated_task: MotionTask = self.make_patch_request(&endpoint, &request).await?;
         info!("Marked Motion task as completed: {}", task_id);
         Ok(updated_task)
+    }
+
+    pub async fn list_labels(&self, workspace_id: &str) -> Result<Vec<MotionLabel>> {
+        let endpoint = format!("labels?workspaceId={}", workspace_id);
+        let response: LabelListResponse = self.make_request(&endpoint).await?;
+        debug!(
+            "Found {} labels in workspace {}",
+            response.labels.len(),
+            workspace_id
+        );
+        Ok(response.labels)
+    }
+
+    pub async fn create_label(
+        &self,
+        workspace_id: &str,
+        name: &str,
+        color_hex: Option<&str>,
+    ) -> Result<MotionLabel> {
+        debug!(
+            "Creating Motion label: {} in workspace {}",
+            name, workspace_id
+        );
+
+        #[derive(Serialize, Debug)]
+        struct CreateLabelRequest {
+            name: String,
+            #[serde(rename = "workspaceId")]
+            workspace_id: String,
+            #[serde(rename = "colorHex", skip_serializing_if = "Option::is_none")]
+            color_hex: Option<String>,
+        }
+
+        let request = CreateLabelRequest {
+            name: name.to_string(),
+            workspace_id: workspace_id.to_string(),
+            color_hex: color_hex.map(|c| c.to_string()),
+        };
+
+        let label: MotionLabel = self.make_post_request("labels", &request).await?;
+        info!("Created Motion label: {} (ID: {})", label.name, label.id);
+        Ok(label)
+    }
+
+    pub async fn ensure_label_exists(
+        &self,
+        workspace_id: &str,
+        label_name: &str,
+    ) -> Result<MotionLabel> {
+        // First, check if the label already exists
+        let labels = self.list_labels(workspace_id).await?;
+
+        if let Some(existing_label) = labels.iter().find(|l| l.name == label_name) {
+            debug!(
+                "Label '{}' already exists with ID: {}",
+                label_name, existing_label.id
+            );
+            return Ok(existing_label.clone());
+        }
+
+        // If it doesn't exist, create it
+        info!(
+            "Label '{}' does not exist in workspace {}, creating it",
+            label_name, workspace_id
+        );
+        let color = match label_name {
+            "linear-sync" => Some("#4F46E5"), // Indigo color for sync labels
+            _ => None,
+        };
+
+        self.create_label(workspace_id, label_name, color).await
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_deserialize() {
+        let x = r#"{"id":"tk_2gkqzra9Lwy5VsMJmoEL1S","name":"[CAR-126] Reach out to dentist","description":"","duration":30,"dueDate":null,"deadlineType":"SOFT","parentRecurringTaskId":null,"completed":false,"completedTime":null,"updatedTime":"2025-09-07T20:48:54.036Z","creator":{"id":"vDP3xJXG3kSNEq2kBsU1yAoCc872","name":"Alexander Lyon","email":"alyon.ipride@gmail.com"},"workspace":{"id":"S01pxiftfAAQzD3JjeA3T","name":"My Tasks (Private)","teamId":null,"statuses":[{"name":"Backlog","isDefaultStatus":false,"isResolvedStatus":false},{"name":"Canceled","isDefaultStatus":false,"isResolvedStatus":false},{"name":"Completed","isDefaultStatus":false,"isResolvedStatus":true},{"name":"Not Started","isDefaultStatus":false,"isResolvedStatus":false},{"name":"Todo","isDefaultStatus":true,"isResolvedStatus":false}],"labels":[{"name":"linear-sync"}],"type":"INDIVIDUAL"},"project":null,"status":{"name":"Todo","isDefaultStatus":true,"isResolvedStatus":false},"priority":"LOW","labels":[{"name":"linear-sync"}],"assignees":[{"id":"vDP3xJXG3kSNEq2kBsU1yAoCc872","name":"Alexander Lyon","email":"alyon.ipride@gmail.com"}],"scheduledStart":null,"createdTime":"2025-09-07T20:48:54.036Z","scheduledEnd":null,"schedulingIssue":false,"lastInteractedTime":"2025-09-07T20:48:54.055Z","customFieldValues":{},"chunks":[]}"#;
+
+        // Some Deserializer.
+        let jd = &mut serde_json::Deserializer::from_str(x);
+
+        // deserialize with serde_json
+        let task: MotionTask = serde_path_to_error::deserialize(jd).unwrap();
     }
 }

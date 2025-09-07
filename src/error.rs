@@ -49,3 +49,9 @@ pub enum Error {
     #[error("{0}")]
     Other(String),
 }
+
+impl From<serde_path_to_error::Error<serde_json::Error>> for Error {
+    fn from(err: serde_path_to_error::Error<serde_json::Error>) -> Self {
+        Error::Json(err.into_inner())
+    }
+}

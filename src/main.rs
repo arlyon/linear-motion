@@ -251,13 +251,61 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
         println!();
 
         for mapping in &mappings {
-            println!("  • Source: {}", mapping.sync_source);
-            println!("    Linear Issue: {}", mapping.linear_issue_id);
-            println!("    Motion Task:  {}", mapping.motion_task_id);
+            // Parse Linear issue data from the mapping
+            let issue_title = if let Ok(issue) = serde_json::from_value::<linear_motion::clients::linear::LinearIssue>(mapping.linear_issue_data.clone()) {
+                format!("{} - {}", issue.identifier, issue.title)
+            } else {
+                mapping.linear_issue_id.clone()
+            };
+
+            let status_icon = match mapping.status {
+                linear_motion::db::MappingStatus::Pending => "⏳",
+                linear_motion::db::MappingStatus::Synced => "✅", 
+                linear_motion::db::MappingStatus::Failed => "❌",
+                linear_motion::db::MappingStatus::Stale => "🔄",
+            };
+
+            let status_str = match mapping.status {
+                linear_motion::db::MappingStatus::Pending => "Pending",
+                linear_motion::db::MappingStatus::Synced => "Synced",
+                linear_motion::db::MappingStatus::Failed => "Failed", 
+                linear_motion::db::MappingStatus::Stale => "Stale",
+            };
+
+            println!("  {} {}", status_icon, issue_title);
+            println!("    Source: {}", mapping.sync_source);
+            println!("    Status: {}", status_str);
+            if let Some(motion_id) = &mapping.motion_task_id {
+                println!("    Motion Task: {}", motion_id);
+            }
             println!("    Created: {}", mapping.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
             println!("    Updated: {}", mapping.updated_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            
             if verbose {
                 println!("    Linear ID: {}", mapping.linear_issue_id);
+                if let Some(attempt) = &mapping.last_sync_attempt {
+                    println!("    Last Sync: {}", attempt.format("%Y-%m-%d %H:%M:%S UTC"));
+                }
+                if let Some(error) = &mapping.sync_error {
+                    println!("    Sync Error: {}", error);
+                }
+                
+                // Show issue details if we have them
+                if let Ok(issue) = serde_json::from_value::<linear_motion::clients::linear::LinearIssue>(mapping.linear_issue_data.clone()) {
+                    if let Some(desc) = &issue.description {
+                        let truncated_desc = if desc.len() > 100 {
+                            format!("{}...", &desc[..100])
+                        } else {
+                            desc.clone()
+                        };
+                        println!("    Description: {}", truncated_desc);
+                    }
+                    println!("    State: {} ({})", issue.state.name, issue.state.state_type);
+                    println!("    Team: {} ({})", issue.team.name, issue.team.key);
+                    if let Some(due_date) = &issue.due_date {
+                        println!("    Due Date: {}", due_date);
+                    }
+                }
             }
             println!();
         }

@@ -1,9 +1,9 @@
 use crate::clients::{
     linear::LinearClient,
-    motion::{MotionClient, MotionTask},
+    motion::{AutoScheduled, Label, MotionClient, MotionTask, MotionWorkspace},
 };
 use crate::config::{AppConfig, SyncRules, SyncSource};
-use crate::db::{SyncDatabase, TaskMapping};
+use crate::db::SyncDatabase;
 use crate::{Error, Result};
 use tracing::{debug, error, info, warn};
 
@@ -86,17 +86,27 @@ impl SyncOrchestrator {
 
         // Get projects to sync from (None means fetch all assigned issues)
         let projects = source.projects.clone();
-        
+
         match &projects {
             Some(project_ids) => {
                 if project_ids.is_empty() {
-                    info!("Empty project list for source '{}' - fetching all assigned issues", source.name);
+                    info!(
+                        "Empty project list for source '{}' - fetching all assigned issues",
+                        source.name
+                    );
                 } else {
-                    info!("Fetching issues from {} specific projects: {:?}", project_ids.len(), project_ids);
+                    info!(
+                        "Fetching issues from {} specific projects: {:?}",
+                        project_ids.len(),
+                        project_ids
+                    );
                 }
             }
             None => {
-                info!("No projects specified for source '{}' - fetching all assigned issues", source.name);
+                info!(
+                    "No projects specified for source '{}' - fetching all assigned issues",
+                    source.name
+                );
             }
         }
 
@@ -121,20 +131,38 @@ impl SyncOrchestrator {
             }
 
             // Check if we already have a mapping for this issue
-            if let Some(_mapping) = self
+            let existing_mapping = self
                 .database
                 .mappings
                 .get_mapping_by_linear_id(&source.name, &issue.id)
-                .await?
-            {
-                debug!("Issue {} already synced, skipping", issue.identifier);
-                continue;
-            }
+                .await?;
 
-            debug!(
-                "Processing new issue: {} - {}",
-                issue.identifier, issue.title
-            );
+            let _mapping = match existing_mapping {
+                Some(mapping) => {
+                    debug!(
+                        "Issue {} already tracked with status: {:?}",
+                        issue.identifier, mapping.status
+                    );
+                    // If it's already synced successfully, skip
+                    if matches!(mapping.status, crate::db::MappingStatus::Synced) {
+                        continue;
+                    }
+                    // If it failed or is pending, we'll retry
+                    mapping
+                }
+                None => {
+                    debug!(
+                        "Processing new issue: {} - {}",
+                        issue.identifier, issue.title
+                    );
+
+                    // Create pending mapping immediately when we fetch the issue
+                    self.database
+                        .mappings
+                        .create_pending_mapping(&source.name, issue)
+                        .await?
+                }
+            };
 
             // Create status entry for tracking
             let status_entry = self
@@ -148,14 +176,11 @@ impl SyncOrchestrator {
                 Ok(motion_task) => {
                     let motion_task_id = motion_task.id.clone().unwrap_or_default();
 
-                    // Store the mapping
-                    let mapping = TaskMapping::new(
-                        issue.id.clone(),
-                        motion_task_id.clone(),
-                        source.name.clone(),
-                    );
-
-                    self.database.mappings.store_mapping(mapping).await?;
+                    // Mark mapping as synced with Motion task ID
+                    self.database
+                        .mappings
+                        .mark_synced(&source.name, &issue.id, motion_task_id.clone())
+                        .await?;
 
                     // Update status as completed
                     self.database
@@ -171,6 +196,13 @@ impl SyncOrchestrator {
                         "❌ Failed to create Motion task for {}: {}",
                         issue.identifier, e
                     );
+
+                    // Mark mapping as failed
+                    self.database
+                        .mappings
+                        .mark_failed(&source.name, &issue.id, e.to_string())
+                        .await?;
+
                     self.database
                         .status
                         .mark_failed(&status_entry.id, e.to_string())
@@ -196,10 +228,19 @@ impl SyncOrchestrator {
         // Get Motion workspaces to determine where to create the task
         let workspaces = self.motion_client.list_workspaces().await?;
 
-        // For now, use the first workspace (in a real implementation, you might want to map teams to workspaces)
-        let workspace = workspaces.first().ok_or_else(|| Error::MotionApi {
-            message: "No Motion workspaces found".to_string(),
-        })?;
+        // Find "My Private Workspace" or use the first available workspace
+        let workspace = workspaces
+            .iter()
+            .find(|w| w.name == "My Private Workspace")
+            .or_else(|| workspaces.first())
+            .ok_or_else(|| Error::MotionApi {
+                message: "No Motion workspaces found".to_string(),
+            })?;
+
+        // Ensure the "linear-sync" label exists in the workspace
+        // self.motion_client
+        //     .ensure_label_exists(&workspace.id, "linear-sync")
+        //     .await?;
 
         // Calculate duration from Linear estimate
         let duration_mins = if let Some(estimate) = issue.estimate {
@@ -233,17 +274,27 @@ impl SyncOrchestrator {
             id: None,
             name: format!("[{}] {}", issue.identifier, issue.title),
             description: issue.description.clone(),
-            workspace_id: workspace.id.clone(),
-            assignee_id: None, // We'll assign to the current user
-            project_id: None,  // Could map Linear projects to Motion projects
+            duration: Some(crate::clients::motion::TaskDuration::from_minutes(
+                duration_mins,
+            )),
+            workspace: Some(MotionWorkspace {
+                id: workspace.id.clone(),
+                name: workspace.name.clone(),
+                team_id: None,
+                workspace_type: "INDIVIDUAL".to_string(),
+            }),
+            auto_scheduled: Some(AutoScheduled {
+                deadlineType: "SOFT".to_string(),
+                schedule: "WORK_HOURS".to_string(),
+                startDate: None,
+            }),
             priority,
             due_date,
-            duration: Some(duration_mins.to_string()),
-            status: None,
             completed: Some(false),
-            labels: Some(vec!["linear-sync".to_string()]),
-            created_time: None,
-            updated_time: None,
+            labels: Some(vec![Label {
+                name: "linear-sync".to_string(),
+            }]),
+            ..Default::default()
         };
 
         // Create the task in Motion
