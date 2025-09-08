@@ -1,0 +1,211 @@
+{
+  "prd_metadata": {
+    "title": "Canonical Sync Engine for Linear & Motion",
+    "author": "Alexander Lyon (@arlyon)",
+    "date": "2025-09-08",
+    "status": "Draft",
+    "version": "1.0"
+  },
+  "overview": {
+    "problem_statement": "The current synchronization engine for Linear and Motion is a primitive, procedural system that is not testable, reliable, or maintainable enough for continuous, long-running operation.",
+    "solution": "Replace the existing system with a new, stateful synchronization daemon built on a Canonical Data Model. This architecture will use 'Lenses' or 'Mappers' to translate data between the native source formats (Linear, Motion) and a central, platform-agnostic model, with state persisted locally in an embedded database (Fjall)."
+  },
+  "goals": [
+    {
+      "id": "G01",
+      "type": "Product",
+      "statement": "Automatically populate the user's Motion calendar with tasks assigned to them in Linear, enabling them to accurately visualize and measure their workload."
+    },
+    {
+      "id": "G02",
+      "type": "Technical",
+      "statement": "Build a highly reliable, testable, and maintainable synchronization daemon that can run continuously without data drift or manual intervention."
+    }
+  ],
+  "target_audience": [
+    {
+      "persona": "Developer (Self-User)",
+      "description": "A software developer (the author) who uses Linear for issue tracking and Motion for calendar blocking and time management.",
+      "needs": [
+        "Automated creation of Motion tasks from Linear issues.",
+        "High reliability and confidence in the sync process.",
+        "Correct handling of the full task lifecycle (creation, updates, completion)."
+      ]
+    }
+  ],
+  "user_stories": [
+    {
+      "id": "US01",
+      "as_a": "developer",
+      "i_want_to": "have all issues assigned to me in Linear be automatically created as tasks in Motion",
+      "so_that": "I don't have to do manual data entry and my calendar is always up-to-date."
+    },
+    {
+      "id": "US02",
+      "as_a": "developer",
+      "i_want_to": "have any updates to my Linear issues (title, description, etc.) be reflected in the corresponding Motion tasks",
+      "so_that": "my calendar accurately represents the current state of my work."
+    },
+    {
+      "id": "US03",
+      "as_a": "developer",
+      "i_want_to": "have a task in Motion be removed from my calendar when its corresponding Linear issue is moved to a terminal state",
+      "so_that": "my calendar only shows active work."
+    },
+    {
+      "id": "US04",
+      "as_a": "developer",
+      "i_want_to": "be able to 'archive' a task in Motion",
+      "so_that": "the corresponding Linear issue is updated with a 'Motioned' label for tracking purposes."
+    },
+    {
+      "id": "US05",
+      "as_a": "developer",
+      "i_want_to": "have the system sync all of my currently assigned Linear issues upon initial setup",
+      "so_that": "I can get started immediately with a complete picture of my workload."
+    }
+  ],
+  "functional_requirements": [
+    {
+      "id": "FR01",
+      "component": "Architecture",
+      "requirement": "The system MUST use a Canonical Data Model as an intermediary, platform-agnostic representation of a synchronized entity."
+    },
+    {
+      "id": "FR02",
+      "component": "Architecture",
+      "requirement": "The core synchronization engine MUST be agnostic of the source APIs (Linear, Motion)."
+    },
+    {
+      "id": "FR03",
+      "component": "Architecture",
+      "requirement": "All data translation logic MUST be encapsulated within source-specific 'mappers' (Lenses)."
+    },
+    {
+      "id": "FR04",
+      "component": "Architecture",
+      "requirement": "The canonical state MUST be persisted locally in an embedded key-value store (Fjall)."
+    },
+    {
+      "id": "FR05",
+      "component": "Sync Logic",
+      "requirement": "Linear is the definitive source of truth for all synchronized data. In any conflict, the state from Linear MUST win."
+    },
+    {
+      "id": "FR06",
+      "component": "Sync Logic",
+      "requirement": "A change to a mapped field in a Linear issue MUST trigger an update to the corresponding Motion task."
+    },
+    {
+      "id": "FR07",
+      "component": "Sync Logic",
+      "requirement": "The 'archived' status in Motion is the only change that triggers a sync to Linear. This action MUST result in a 'Motioned' label being added to the Linear issue."
+    },
+    {
+      "id": "FR08",
+      "component": "Sync Logic",
+      "requirement": "Upon first run, the system MUST sync all open issues currently assigned to the user in Linear."
+    },
+    {
+      "id": "FR09",
+      "component": "Sync Logic",
+      "requirement": "When a Linear issue is moved to a terminal state (Done, Canceled, etc.) or deleted, the system MUST delete the corresponding Motion task and remove the entity from the local state database."
+    },
+    {
+      "id": "FR10",
+      "component": "Sync Logic",
+      "requirement": "If a terminal Linear issue is reopened, it MUST be treated as a new issue and create a new task in Motion."
+    }
+  ],
+  "non_functional_requirements": [
+    {
+      "id": "NFR01",
+      "category": "Reliability",
+      "requirement": "The sync daemon must be able to run continuously for over one week without crashes, data drift, or inconsistencies."
+    },
+    {
+      "id": "NFR02",
+      "category": "Testability",
+      "requirement": "All business logic (mappers/lenses) must be unit-testable in isolation from network I/O."
+    },
+    {
+      "id": "NFR03",
+      "category": "Idempotency",
+      "requirement": "All sync operations must be idempotent."
+    },
+    {
+      "id": "NFR04",
+      "category": "Performance",
+      "requirement": "Linear to Motion (webhook-driven) sync must complete within 3 seconds."
+    },
+    {
+      "id": "NFR05",
+      "category": "Performance",
+      "requirement": "Motion to Linear (polling) sync must occur no more frequently than once every 10 seconds."
+    },
+    {
+      "id":_llm_prompt_template: "NFR06",
+      "category": "Security",
+      "requirement": "API keys and other credentials must be managed securely via environment variables or a secrets manager."
+    }
+  ],
+  "success_metrics": [
+    {
+      "id": "SM01",
+      "type": "Adoption/Usage",
+      "metric": "The tool is used daily by the author.",
+      "target": "Achieves 'set it and forget it' status, reliably automating the workflow without manual intervention."
+    },
+    {
+      "id": "SM02",
+      "type": "Technical Validation",
+      "metric": "The sync daemon runs for >1 week continuously without data drift.",
+      "target": "Pass"
+    },
+    {
+      "id": "SM03",
+      "type": "Technical Validation",
+      "metric": "Comprehensive unit test suite for mappers passes.",
+      "target": "Pass"
+    }
+  ],
+  "out_of_scope": [
+    "An accompanying web app for configuration or monitoring.",
+    "True bidirectional sync for fields other than the 'archived' status.",
+    "User-configurable field mappings or transformation rules."
+  ],
+  "technical_appendix": {
+    "notes": "The implementation should follow the architecture outlined in the 'Canonical Data Model with Lenses' ADR. The core of the work involves creating the mappers and the agnostic diffing engine.",
+    "implementation_pointers": [
+      {
+        "section": "Linear Mapper",
+        "description": "Responsible for fetching data from Linear's GraphQL API, transforming it into the Canonical Model, and applying diffs from the engine to update Linear issues (e.g., adding labels).",
+        "file_references": [
+          "docs/linear-api-docs.md#L211-345",
+          "docs/linear-api-docs.md#L414-527"
+        ]
+      },
+      {
+        "section": "Motion Mapper",
+        "description": "Responsible for polling Motion's REST API, transforming tasks into the Canonical Model (specifically for the 'archived' status), and applying diffs from the engine to create/update/delete tasks in Motion.",
+        "file_references": [
+          "docs/motion-api-docs.md#L504-655",
+          "docs/motion-api-docs.md#L486-502"
+        ]
+      },
+      {
+        "section": "Diff Engine & Persistence",
+        "description": "The core, agnostic component that compares a proposed state with the current state stored in Fjall. It calculates the delta and passes it to the target mapper. This component must be idempotent.",
+        "file_references": []
+      },
+      {
+        "section": "Daemon & Schedulers",
+        "description": "The main application entry point that will host the webhook server for Linear events and run the polling scheduler for Motion.",
+        "file_references": [
+          "docs/linear-api-docs.md#L98-186",
+          "docs/motion-api-docs.md#L146-153"
+        ]
+      }
+    ]
+  }
+}
