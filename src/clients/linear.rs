@@ -361,10 +361,7 @@ impl LinearClient {
 
         let query = r#"
             mutation AddLabelToIssue($issueId: String!, $labelId: String!) {
-                issueLabelCreate(input: {
-                    issueId: $issueId,
-                    labelId: $labelId
-                }) {
+                issueAddLabel(id: $issueId, labelId: $labelId) {
                     success
                 }
             }
@@ -376,8 +373,8 @@ impl LinearClient {
 
         #[derive(Deserialize)]
         struct AddLabelResponse {
-            #[serde(rename = "issueLabelCreate")]
-            issue_label_create: MutationResponse,
+            #[serde(rename = "issueAddLabel")]
+            issue_add_label: MutationResponse,
         }
 
         #[derive(Deserialize)]
@@ -389,7 +386,7 @@ impl LinearClient {
             .execute_query(query, Some(serde_json::to_value(variables)?))
             .await?;
 
-        if !response.issue_label_create.success {
+        if !response.issue_add_label.success {
             warn!("Failed to add label '{}' to issue {}", label_name, issue_id);
             return Err(Error::LinearApi {
                 message: format!("Failed to add label '{}' to issue", label_name),

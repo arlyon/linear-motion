@@ -46,6 +46,9 @@ pub enum Commands {
             default_value = ".sync-tool.pid"
         )]
         pid_file: String,
+
+        #[arg(short, long, help = "Force update all tasks regardless of detected changes")]
+        force: bool,
     },
 
     /// Query daemon status

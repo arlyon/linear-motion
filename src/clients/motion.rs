@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use governor::{Quota, RateLimiter};
 use reqwest::{
     header::{HeaderMap, HeaderValue},
-    Client,
 };
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -74,7 +75,7 @@ impl From<u32> for TaskDuration {
 
 #[derive(Debug)]
 pub struct MotionClient {
-    client: Client,
+    client: ClientWithMiddleware,
     api_key: String,
     base_url: String,
     rate_limiter: RateLimiter<
@@ -101,9 +102,11 @@ pub struct Label {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AutoScheduled {
-    pub startDate: Option<DateTime<Utc>>,
+    #[serde(rename = "startDate")]
+    pub start_date: Option<DateTime<Utc>>,
     /// HARD SOFT NONE
-    pub deadlineType: String,
+    #[serde(rename = "deadlineType")]
+    pub deadline_type: String,
     /// Work Hours
     pub schedule: String,
 }
@@ -198,7 +201,21 @@ impl MotionClient {
         let mut headers = HeaderMap::new();
         headers.insert("X-API-Key", HeaderValue::from_str(&api_key)?);
 
-        let client = Client::builder().default_headers(headers).build()?;
+        let base_client = reqwest::Client::builder().default_headers(headers).build()?;
+        
+        // Configure exponential backoff retry policy
+        // Start with 10 seconds as requested, with exponential backoff
+        let retry_policy = ExponentialBackoff::builder()
+            .retry_bounds(
+                std::time::Duration::from_secs(10),  // Start with 10 seconds as requested
+                std::time::Duration::from_secs(60),  // Cap at 60 seconds
+            )
+            .build_with_max_retries(3);
+
+        // Create client with retry middleware specifically for 429 errors
+        let client = ClientBuilder::new(base_client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build();
 
         // Motion rate limit: 12 requests per minute for individuals, 120 for teams
         // We'll use exactly 12 requests per minute for individuals
@@ -219,13 +236,18 @@ impl MotionClient {
         Ok(())
     }
 
+
     async fn make_request<T: for<'de> Deserialize<'de>>(&self, endpoint: &str) -> Result<T> {
         self.rate_limit().await?;
 
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
         debug!("Making Motion API request: GET {}", url);
 
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            Error::MotionApi {
+                message: format!("Request failed: {}", e),
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -260,7 +282,11 @@ impl MotionClient {
             serde_json::to_string(&body)
         );
 
-        let response = self.client.post(&url).json(body).send().await?;
+        let response = self.client.post(&url).json(body).send().await.map_err(|e| {
+            Error::MotionApi {
+                message: format!("Request failed: {}", e),
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -299,7 +325,11 @@ impl MotionClient {
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
         debug!("Making Motion API request: PATCH {}", url);
 
-        let response = self.client.patch(&url).json(body).send().await?;
+        let response = self.client.patch(&url).json(body).send().await.map_err(|e| {
+            Error::MotionApi {
+                message: format!("Request failed: {}", e),
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -365,7 +395,19 @@ impl MotionClient {
             duration: Option<TaskDuration>,
             #[serde(skip_serializing_if = "Option::is_none")]
             labels: Option<Vec<String>>,
+            // Auto-scheduling fields (sent as individual fields, not nested object)
+            #[serde(rename = "autoScheduled", skip_serializing_if = "Option::is_none")]
+            auto_scheduled: Option<serde_json::Value>,
         }
+
+        // Convert auto_scheduled to the correct format for Motion API
+        let auto_scheduled_value = task.auto_scheduled.as_ref().map(|auto_sched| {
+            serde_json::json!({
+                "startDate": auto_sched.start_date,
+                "deadlineType": auto_sched.deadline_type,
+                "schedule": auto_sched.schedule
+            })
+        });
 
         let request = CreateTaskRequest {
             name: task.name.clone(),
@@ -384,6 +426,7 @@ impl MotionClient {
                 .labels
                 .clone()
                 .map(|l| l.into_iter().map(|l| l.name).collect()),
+            auto_scheduled: auto_scheduled_value,
         };
 
         let created_task: MotionTask = self.make_post_request("tasks", &request).await?;
@@ -562,5 +605,52 @@ mod test {
 
         // deserialize with serde_json
         let task: MotionTask = serde_path_to_error::deserialize(jd).unwrap();
+    }
+
+    #[test]
+    fn test_task_duration_serialization() {
+        // Test that TaskDuration serializes to the correct format for Motion API
+        let duration_none = TaskDuration::None;
+        let duration_reminder = TaskDuration::Reminder;
+        let duration_30_min = TaskDuration::Minutes(30);
+        let duration_120_min = TaskDuration::Minutes(120);
+
+        // Serialize to JSON
+        let json_none = serde_json::to_string(&duration_none).unwrap();
+        let json_reminder = serde_json::to_string(&duration_reminder).unwrap();
+        let json_30 = serde_json::to_string(&duration_30_min).unwrap();
+        let json_120 = serde_json::to_string(&duration_120_min).unwrap();
+
+        // Check correct formats
+        assert_eq!(json_none, "\"NONE\"");
+        assert_eq!(json_reminder, "\"REMINDER\"");
+        assert_eq!(json_30, "30");
+        assert_eq!(json_120, "120");
+
+        // Test round-trip deserialization
+        let parsed_none: TaskDuration = serde_json::from_str(&json_none).unwrap();
+        let parsed_reminder: TaskDuration = serde_json::from_str(&json_reminder).unwrap();
+        let parsed_30: TaskDuration = serde_json::from_str(&json_30).unwrap();
+        let parsed_120: TaskDuration = serde_json::from_str(&json_120).unwrap();
+
+        match parsed_none {
+            TaskDuration::None => (),
+            _ => panic!("Expected TaskDuration::None"),
+        }
+
+        match parsed_reminder {
+            TaskDuration::Reminder => (),
+            _ => panic!("Expected TaskDuration::Reminder"),
+        }
+
+        match parsed_30 {
+            TaskDuration::Minutes(30) => (),
+            _ => panic!("Expected TaskDuration::Minutes(30)"),
+        }
+
+        match parsed_120 {
+            TaskDuration::Minutes(120) => (),
+            _ => panic!("Expected TaskDuration::Minutes(120)"),
+        }
     }
 }

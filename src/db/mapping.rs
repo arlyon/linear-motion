@@ -231,6 +231,26 @@ impl MappingStore {
         Ok(())
     }
 
+    /// Update the stored Linear issue data in a mapping (used for re-sync)
+    pub async fn update_issue_data(
+        &self,
+        sync_source: &str,
+        linear_issue_id: &str,
+        issue: &crate::clients::linear::LinearIssue,
+    ) -> Result<()> {
+        if let Some(mut mapping) = self
+            .get_mapping_by_linear_id(sync_source, linear_issue_id)
+            .await?
+        {
+            mapping.linear_issue_data = serde_json::to_value(issue)?;
+            mapping.updated_at = chrono::Utc::now();
+
+            self.store_mapping(mapping).await?;
+            debug!("Updated issue data for mapping: {}", linear_issue_id);
+        }
+        Ok(())
+    }
+
     /// Get mappings by status
     pub async fn list_mappings_by_status(&self, status: MappingStatus) -> Result<Vec<TaskMapping>> {
         let mut mappings = Vec::new();

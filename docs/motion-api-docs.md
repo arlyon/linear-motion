@@ -446,13 +446,18 @@ Required fields:
 - `assigneeId` - User assigned to task
 
 Optional fields:
-- `deadlineType` - "HARD" or "SOFT" (default: SOFT)
-- `duration` - Integer > 0 or "REMINDER"
-- `startingOn` - ISO 8601 date
-- `idealTime` - Preferred scheduling time (HH:mm)
-- `schedule` - Default is "Work Hours"
-- `description` - Task description
-- `priority` - "HIGH" or "MEDIUM" (default: MEDIUM)
+- `dueDate` (datetime) - ISO 8601 Due date on the task. REQUIRED for scheduled tasks.
+- `duration` (string | number) - "NONE", "REMINDER", or integer > 0 (minutes)
+- `status` (string) - Defaults to workspace default status
+- `autoScheduled` (object | null) - Set values to enable auto scheduling, null to disable
+  - `startDate` (datetime) - ISO 8601 date trimmed to start of day
+  - `deadlineType` (string) - "HARD", "SOFT", or "NONE" (default: SOFT)
+  - `schedule` (string) - Schedule name (default: "Work Hours")
+- `description` (string) - Github Flavored Markdown
+- `priority` (string) - "ASAP", "HIGH", "MEDIUM", "LOW"
+- `labels` (array<string>) - Label names
+- `assigneeId` (string) - User ID to assign task to
+- `projectId` (string) - Project ID to associate with
 
 ### Schedules
 
@@ -625,14 +630,18 @@ Required Parameters:
 - `workspaceId` (string) - Workspace ID
 
 Optional Parameters:
-- `dueDate` (datetime) - ISO 8601 due date
-- `duration` (string/number) - Task duration
+- `dueDate` (datetime) - ISO 8601 Due date. REQUIRED for scheduled tasks
+- `duration` (string | number) - "NONE", "REMINDER", or integer > 0 (minutes)
 - `status` (string) - Workspace default status
+- `autoScheduled` (object | null) - Auto-scheduling configuration
+  - `startDate` (datetime) - ISO 8601 date trimmed to start of day
+  - `deadlineType` (string) - "HARD", "SOFT", or "NONE" (default: SOFT)  
+  - `schedule` (string) - Schedule name (default: "Work Hours")
 - `projectId` (string) - Project association
 - `description` (string) - GitHub Flavored Markdown
 - `priority` (string) - ASAP, HIGH, MEDIUM, LOW
-- `labels` (array) - Label names
-- `assigneeId` (string) - User ID for task assignment
+- `labels` (array<string>) - Label names
+- `assigneeId` (string) - User ID to assign task to
 
 #### Unassign Task
 

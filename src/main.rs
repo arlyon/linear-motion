@@ -24,8 +24,8 @@ async fn main() -> Result<()> {
         Commands::Init { output, force } => {
             handle_init(output.as_deref(), force).await?;
         }
-        Commands::Sync { watch, pid_file } => {
-            handle_sync(cli.config.as_deref(), watch, &pid_file).await?;
+        Commands::Sync { watch, pid_file, force } => {
+            handle_sync(cli.config.as_deref(), watch, &pid_file, force).await?;
         }
         Commands::Status => {
             handle_status().await?;
@@ -142,7 +142,7 @@ async fn handle_init(output: Option<&str>, force: bool) -> Result<()> {
     Ok(())
 }
 
-async fn handle_sync(config_path: Option<&str>, watch: bool, pid_file: &str) -> Result<()> {
+async fn handle_sync(config_path: Option<&str>, watch: bool, pid_file: &str, force: bool) -> Result<()> {
     use linear_motion::config::ConfigLoader;
     use linear_motion::sync::orchestrator::SyncOrchestrator;
     use std::fs;
@@ -182,8 +182,8 @@ async fn handle_sync(config_path: Option<&str>, watch: bool, pid_file: &str) -> 
         println!("💾 Database: {:?}", config.database_path());
 
         // Initialize and run sync orchestrator
-        let mut orchestrator = SyncOrchestrator::new(&config).await?;
-        match orchestrator.run_full_sync(&config).await {
+        let orchestrator = SyncOrchestrator::new(&config).await?;
+        match orchestrator.run_full_sync(&config, force).await {
             Ok(()) => {
                 println!("✅ Sync completed successfully!");
             }
