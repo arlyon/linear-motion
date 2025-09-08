@@ -233,6 +233,7 @@ impl SyncOrchestrator {
                     motion_task_id,
                     issue,
                     &sync_rules,
+                    &source.name,
                 )
                 .await
                 {
@@ -269,7 +270,7 @@ impl SyncOrchestrator {
                 }
             } else {
                 // Create new Motion task
-                match Self::create_motion_task_from_issue(&motion_client, issue, &sync_rules).await
+                match Self::create_motion_task_from_issue(&motion_client, issue, &sync_rules, &source.name).await
                 {
                     Ok(motion_task) => {
                         let motion_task_id = motion_task.id.clone().unwrap_or_default();
@@ -420,6 +421,21 @@ impl SyncOrchestrator {
         Ok(())
     }
 
+    /// Format the description with a link back to the Linear issue
+    fn format_description_with_link(
+        issue: &crate::clients::linear::LinearIssue,
+        sync_source_name: &str,
+    ) -> Option<String> {
+        let base_description = issue.description.as_ref().cloned().unwrap_or_default();
+        let linear_link = format!("https://linear.app/{}/issue/{}", sync_source_name, issue.identifier);
+        
+        if base_description.is_empty() {
+            Some(format!("Linear: {}", linear_link))
+        } else {
+            Some(format!("{}\n\nLinear: {}", base_description, linear_link))
+        }
+    }
+
     /// Check if a Linear issue has changes that require updating the Motion task
     fn issue_needs_update(
         mapping: &crate::db::mapping::TaskMapping,
@@ -459,6 +475,7 @@ impl SyncOrchestrator {
         motion_task_id: &str,
         issue: &crate::clients::linear::LinearIssue,
         sync_rules: &SyncRules,
+        sync_source_name: &str,
     ) -> Result<MotionTask> {
         // Calculate duration from Linear estimate
         let duration_mins = if let Some(estimate) = issue.estimate {
@@ -491,7 +508,7 @@ impl SyncOrchestrator {
         let motion_task = MotionTask {
             id: Some(motion_task_id.to_string()),
             name: format!("[{}] {}", issue.identifier, issue.title),
-            description: issue.description.clone(),
+            description: Self::format_description_with_link(issue, sync_source_name),
             duration: Some(crate::clients::motion::TaskDuration::from_minutes(
                 duration_mins,
             )),
@@ -519,6 +536,7 @@ impl SyncOrchestrator {
         motion_client: &MotionClient,
         issue: &crate::clients::linear::LinearIssue,
         sync_rules: &SyncRules,
+        sync_source_name: &str,
     ) -> Result<MotionTask> {
         // Get Motion workspaces to determine where to create the task
         let workspaces = motion_client.list_workspaces().await?;
@@ -576,7 +594,7 @@ impl SyncOrchestrator {
         let motion_task = MotionTask {
             id: None,
             name: format!("[{}] {}", issue.identifier, issue.title),
-            description: issue.description.clone(),
+            description: Self::format_description_with_link(issue, sync_source_name),
             duration: Some(crate::clients::motion::TaskDuration::from_minutes(
                 duration_mins,
             )),
