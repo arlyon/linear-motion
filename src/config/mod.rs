@@ -1,5 +1,5 @@
-pub mod models;
 pub mod loader;
+pub mod models;
 
-pub use models::{AppConfig, SyncSource, SyncRules, TimeEstimateStrategy, ScheduleOverride};
 pub use loader::ConfigLoader;
+pub use models::{AppConfig, ScheduleOverride, SyncRules, SyncSource, TimeEstimateStrategy};

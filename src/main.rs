@@ -211,7 +211,11 @@ async fn handle_stop() -> Result<()> {
     Ok(())
 }
 
-async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Option<&str>) -> Result<()> {
+async fn handle_list(
+    config_path: Option<&str>,
+    verbose: bool,
+    source_filter: Option<&str>,
+) -> Result<()> {
     use linear_motion::config::ConfigLoader;
     use linear_motion::db::SyncDatabase;
 
@@ -224,7 +228,7 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
 
     // Load configuration to get database path
     let config = ConfigLoader::load_from_file(&config_path).await?;
-    
+
     // Initialize database
     let database = SyncDatabase::new(config.database_path()).await?;
 
@@ -252,7 +256,10 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
 
         for mapping in &mappings {
             // Parse Linear issue data from the mapping
-            let issue_title = if let Ok(issue) = serde_json::from_value::<linear_motion::clients::linear::LinearIssue>(mapping.linear_issue_data.clone()) {
+            let issue_title = if let Ok(issue) = serde_json::from_value::<
+                linear_motion::clients::linear::LinearIssue,
+            >(mapping.linear_issue_data.clone())
+            {
                 format!("{} - {}", issue.identifier, issue.title)
             } else {
                 mapping.linear_issue_id.clone()
@@ -260,7 +267,7 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
 
             let status_icon = match mapping.status {
                 linear_motion::db::MappingStatus::Pending => "⏳",
-                linear_motion::db::MappingStatus::Synced => "✅", 
+                linear_motion::db::MappingStatus::Synced => "✅",
                 linear_motion::db::MappingStatus::Failed => "❌",
                 linear_motion::db::MappingStatus::Stale => "🔄",
             };
@@ -268,7 +275,7 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
             let status_str = match mapping.status {
                 linear_motion::db::MappingStatus::Pending => "Pending",
                 linear_motion::db::MappingStatus::Synced => "Synced",
-                linear_motion::db::MappingStatus::Failed => "Failed", 
+                linear_motion::db::MappingStatus::Failed => "Failed",
                 linear_motion::db::MappingStatus::Stale => "Stale",
             };
 
@@ -278,9 +285,15 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
             if let Some(motion_id) = &mapping.motion_task_id {
                 println!("    Motion Task: {}", motion_id);
             }
-            println!("    Created: {}", mapping.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
-            println!("    Updated: {}", mapping.updated_at.format("%Y-%m-%d %H:%M:%S UTC"));
-            
+            println!(
+                "    Created: {}",
+                mapping.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            println!(
+                "    Updated: {}",
+                mapping.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+
             if verbose {
                 println!("    Linear ID: {}", mapping.linear_issue_id);
                 if let Some(attempt) = &mapping.last_sync_attempt {
@@ -289,9 +302,12 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
                 if let Some(error) = &mapping.sync_error {
                     println!("    Sync Error: {}", error);
                 }
-                
+
                 // Show issue details if we have them
-                if let Ok(issue) = serde_json::from_value::<linear_motion::clients::linear::LinearIssue>(mapping.linear_issue_data.clone()) {
+                if let Ok(issue) = serde_json::from_value::<
+                    linear_motion::clients::linear::LinearIssue,
+                >(mapping.linear_issue_data.clone())
+                {
                     if let Some(desc) = &issue.description {
                         let truncated_desc = if desc.len() > 100 {
                             format!("{}...", &desc[..100])
@@ -300,7 +316,10 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
                         };
                         println!("    Description: {}", truncated_desc);
                     }
-                    println!("    State: {} ({})", issue.state.name, issue.state.state_type);
+                    println!(
+                        "    State: {} ({})",
+                        issue.state.name, issue.state.state_type
+                    );
                     println!("    Team: {} ({})", issue.team.name, issue.team.key);
                     if let Some(due_date) = &issue.due_date {
                         println!("    Due Date: {}", due_date);
@@ -320,7 +339,10 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
             let mut all_entries = Vec::new();
             let source_stats = database.status.list_all_source_stats().await?;
             for source_stat in source_stats {
-                let source_entries = database.status.list_statuses_by_source(&source_stat.source_name).await?;
+                let source_entries = database
+                    .status
+                    .list_statuses_by_source(&source_stat.source_name)
+                    .await?;
                 all_entries.extend(source_entries);
             }
             all_entries
@@ -337,7 +359,7 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
         for entry in &status_entries {
             let status_str = match entry.status {
                 linear_motion::db::status::SyncStatus::InProgress => "InProgress",
-                linear_motion::db::status::SyncStatus::Completed => "Completed", 
+                linear_motion::db::status::SyncStatus::Completed => "Completed",
                 linear_motion::db::status::SyncStatus::Failed => "Failed",
                 linear_motion::db::status::SyncStatus::Paused => "Paused",
             };
@@ -358,18 +380,28 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
 
         if verbose {
             println!("📝 Detailed Status Entries:");
-            for entry in status_entries.iter().take(10) { // Limit to first 10 for readability
+            for entry in status_entries.iter().take(10) {
+                // Limit to first 10 for readability
                 let (icon, status_str) = match entry.status {
                     linear_motion::db::status::SyncStatus::InProgress => ("🔄", "InProgress"),
                     linear_motion::db::status::SyncStatus::Completed => ("✅", "Completed"),
                     linear_motion::db::status::SyncStatus::Failed => ("❌", "Failed"),
                     linear_motion::db::status::SyncStatus::Paused => ("⏸️", "Paused"),
                 };
-                
-                println!("  {} {} - {}", icon, entry.sync_source, entry.linear_issue_id);
+
+                println!(
+                    "  {} {} - {}",
+                    icon, entry.sync_source, entry.linear_issue_id
+                );
                 println!("     Status: {}", status_str);
-                println!("     Created: {}", entry.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
-                println!("     Last Sync: {}", entry.last_sync_attempt.format("%Y-%m-%d %H:%M:%S UTC"));
+                println!(
+                    "     Created: {}",
+                    entry.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+                );
+                println!(
+                    "     Last Sync: {}",
+                    entry.last_sync_attempt.format("%Y-%m-%d %H:%M:%S UTC")
+                );
                 if let Some(error) = &entry.error_message {
                     println!("     Error: {}", error);
                 }
@@ -382,9 +414,12 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
                 }
                 println!();
             }
-            
+
             if status_entries.len() > 10 {
-                println!("  ... and {} more entries (use --source filter to see specific source)", status_entries.len() - 10);
+                println!(
+                    "  ... and {} more entries (use --source filter to see specific source)",
+                    status_entries.len() - 10
+                );
                 println!();
             }
         }
@@ -396,7 +431,8 @@ async fn handle_list(config_path: Option<&str>, verbose: bool, source_filter: Op
         println!("📊 Source Statistics:");
         for stat in &source_stats {
             println!("  • {}", stat.source_name);
-            println!("    Last sync: {}", 
+            println!(
+                "    Last sync: {}",
                 if let Some(last_sync) = &stat.last_sync {
                     last_sync.format("%Y-%m-%d %H:%M:%S UTC").to_string()
                 } else {

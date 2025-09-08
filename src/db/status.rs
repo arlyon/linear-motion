@@ -46,11 +46,13 @@ pub struct StatusStore {
 impl StatusStore {
     pub async fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let keyspace = fjall::Config::new(db_path).open()?;
-        let statuses = keyspace.open_partition("sync_statuses", fjall::PartitionCreateOptions::default())?;
-        let source_stats = keyspace.open_partition("source_stats", fjall::PartitionCreateOptions::default())?;
-        
+        let statuses =
+            keyspace.open_partition("sync_statuses", fjall::PartitionCreateOptions::default())?;
+        let source_stats =
+            keyspace.open_partition("source_stats", fjall::PartitionCreateOptions::default())?;
+
         info!("Status tracking store initialized");
-        
+
         Ok(Self {
             keyspace,
             statuses,
@@ -58,7 +60,11 @@ impl StatusStore {
         })
     }
 
-    pub async fn create_status_entry(&self, sync_source: String, linear_issue_id: String) -> Result<SyncStatusEntry> {
+    pub async fn create_status_entry(
+        &self,
+        sync_source: String,
+        linear_issue_id: String,
+    ) -> Result<SyncStatusEntry> {
         let entry = SyncStatusEntry::new(sync_source, linear_issue_id);
         self.store_status_entry(&entry).await?;
         Ok(entry)
@@ -67,10 +73,13 @@ impl StatusStore {
     pub async fn store_status_entry(&self, entry: &SyncStatusEntry) -> Result<()> {
         let key = &entry.id;
         let value = serde_json::to_vec(entry)?;
-        
+
         self.statuses.insert(key, &value)?;
-        debug!("Stored status entry: {} ({})", entry.id, entry.linear_issue_id);
-        
+        debug!(
+            "Stored status entry: {} ({})",
+            entry.id, entry.linear_issue_id
+        );
+
         Ok(())
     }
 
@@ -80,27 +89,32 @@ impl StatusStore {
                 let entry: SyncStatusEntry = serde_json::from_slice(&value)?;
                 Ok(Some(entry))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
-    pub async fn update_status(&self, id: &str, status: SyncStatus, error_message: Option<String>) -> Result<()> {
+    pub async fn update_status(
+        &self,
+        id: &str,
+        status: SyncStatus,
+        error_message: Option<String>,
+    ) -> Result<()> {
         if let Some(mut entry) = self.get_status_entry(id).await? {
             entry.status = status;
             entry.error_message = error_message.clone();
             entry.last_sync_attempt = chrono::Utc::now();
             entry.updated_at = chrono::Utc::now();
-            
+
             if error_message.is_some() {
                 entry.retry_count += 1;
             }
-            
+
             self.store_status_entry(&entry).await?;
             debug!("Updated status for {}: {:?}", id, entry.status);
         } else {
             warn!("Attempted to update non-existent status entry: {}", id);
         }
-        
+
         Ok(())
     }
 
@@ -111,46 +125,51 @@ impl StatusStore {
             entry.last_sync_attempt = chrono::Utc::now();
             entry.updated_at = chrono::Utc::now();
             entry.error_message = None;
-            
+
             self.store_status_entry(&entry).await?;
             debug!("Marked {} as completed", id);
         }
-        
+
         Ok(())
     }
 
     pub async fn mark_failed(&self, id: &str, error: String) -> Result<()> {
-        self.update_status(id, SyncStatus::Failed, Some(error)).await
+        self.update_status(id, SyncStatus::Failed, Some(error))
+            .await
     }
 
     pub async fn list_statuses_by_source(&self, sync_source: &str) -> Result<Vec<SyncStatusEntry>> {
         let mut entries = Vec::new();
-        
+
         for item in self.statuses.iter() {
             let (_, value) = item?;
             let entry: SyncStatusEntry = serde_json::from_slice(&value)?;
-            
+
             if entry.sync_source == sync_source {
                 entries.push(entry);
             }
         }
-        
-        debug!("Found {} status entries for source: {}", entries.len(), sync_source);
+
+        debug!(
+            "Found {} status entries for source: {}",
+            entries.len(),
+            sync_source
+        );
         Ok(entries)
     }
 
     pub async fn list_failed_entries(&self) -> Result<Vec<SyncStatusEntry>> {
         let mut failed_entries = Vec::new();
-        
+
         for item in self.statuses.iter() {
             let (_, value) = item?;
             let entry: SyncStatusEntry = serde_json::from_slice(&value)?;
-            
+
             if matches!(entry.status, SyncStatus::Failed) {
                 failed_entries.push(entry);
             }
         }
-        
+
         debug!("Found {} failed status entries", failed_entries.len());
         Ok(failed_entries)
     }
@@ -161,17 +180,24 @@ impl StatusStore {
                 let status: SyncSourceStatus = serde_json::from_slice(&value)?;
                 Ok(Some(status))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
-    pub async fn update_source_stats(&self, source_name: &str, success: bool, error: Option<String>) -> Result<()> {
-        let mut status = self.get_source_status(source_name).await?
+    pub async fn update_source_stats(
+        &self,
+        source_name: &str,
+        success: bool,
+        error: Option<String>,
+    ) -> Result<()> {
+        let mut status = self
+            .get_source_status(source_name)
+            .await?
             .unwrap_or_else(|| SyncSourceStatus::new(source_name.to_string()));
-        
+
         status.last_sync = Some(chrono::Utc::now());
         status.total_issues_processed += 1;
-        
+
         if success {
             status.successful_syncs += 1;
         } else {
@@ -184,52 +210,54 @@ impl StatusStore {
                 }
             }
         }
-        
+
         let value = serde_json::to_vec(&status)?;
         self.source_stats.insert(source_name, &value)?;
-        
-        debug!("Updated stats for source {}: {} successful, {} failed", 
-               source_name, status.successful_syncs, status.failed_syncs);
-        
+
+        debug!(
+            "Updated stats for source {}: {} successful, {} failed",
+            source_name, status.successful_syncs, status.failed_syncs
+        );
+
         Ok(())
     }
 
     pub async fn list_all_source_stats(&self) -> Result<Vec<SyncSourceStatus>> {
         let mut stats = Vec::new();
-        
+
         for item in self.source_stats.iter() {
             let (_, value) = item?;
             let status: SyncSourceStatus = serde_json::from_slice(&value)?;
             stats.push(status);
         }
-        
+
         Ok(stats)
     }
 
     pub async fn cleanup_old_entries(&self, older_than_days: u64) -> Result<u64> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(older_than_days as i64);
         let mut deleted_count = 0;
-        
+
         let mut keys_to_delete = Vec::new();
-        
+
         for item in self.statuses.iter() {
             let (key, value) = item?;
             let entry: SyncStatusEntry = serde_json::from_slice(&value)?;
-            
+
             if entry.created_at < cutoff && matches!(entry.status, SyncStatus::Completed) {
                 keys_to_delete.push(key.to_vec());
             }
         }
-        
+
         for key in keys_to_delete {
             self.statuses.remove(&key)?;
             deleted_count += 1;
         }
-        
+
         if deleted_count > 0 {
             info!("Cleaned up {} old status entries", deleted_count);
         }
-        
+
         Ok(deleted_count)
     }
 
@@ -242,7 +270,7 @@ impl StatusStore {
 impl SyncStatusEntry {
     pub fn new(sync_source: String, linear_issue_id: String) -> Self {
         let now = chrono::Utc::now();
-        
+
         Self {
             id: Uuid::new_v4().to_string(),
             sync_source,

@@ -1,6 +1,6 @@
 use crate::clients::{
     linear::LinearClient,
-    motion::{AutoScheduled, Label, MotionClient, MotionTask, MotionWorkspace},
+    motion::{AutoScheduled, Label, MotionClient, MotionTask, MotionWorkspace, Status},
 };
 use crate::config::{AppConfig, SyncRules, SyncSource};
 use crate::db::SyncDatabase;
@@ -287,6 +287,11 @@ impl SyncOrchestrator {
                 deadlineType: "SOFT".to_string(),
                 schedule: "WORK_HOURS".to_string(),
                 startDate: None,
+            }),
+            status: Some(Status {
+                name: "Todo".to_string(),
+                is_default_status: true,
+                is_resolved_status: false,
             }),
             priority,
             due_date,

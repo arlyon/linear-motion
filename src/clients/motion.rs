@@ -88,8 +88,10 @@ pub struct MotionClient {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Status {
     pub name: String,
-    pub isDefaultStatus: bool,
-    pub isResolvedStatus: bool,
+    #[serde(rename = "isDefaultStatus")]
+    pub is_default_status: bool,
+    #[serde(rename = "isResolvedStatus")]
+    pub is_resolved_status: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
