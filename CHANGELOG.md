@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/arlyon/linear-motion/compare/v0.1.0...v0.1.1) - 2025-09-17
+
+### Fixed
+- make sure it is referenced as linear-motion everywhere
+- minor formatting
+
+### Miscellaneous
+- update crate description
+- more readme formatting
+- licensing
+- add readme
+
 ## [0.1.0](https://github.com/arlyon/linear-motion/releases/tag/v0.1.0) - 2025-09-17
 
 ### Other
