@@ -36,7 +36,7 @@ impl MappingStore {
         let mappings =
             keyspace.open_partition("task_mappings", fjall::PartitionCreateOptions::default())?;
 
-        debug!("Task mapping store initialized");
+        debug!("task mapping store initialized");
 
         Ok(Self { keyspace, mappings })
     }
