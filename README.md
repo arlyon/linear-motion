@@ -175,4 +175,9 @@ Contributions are welcome! Please see the [contributing guidelines](CONTRIBUTING
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is dual-licensed under either of
+
+* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE))
+* MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. See [LICENSE.md](LICENSE.md) for details.
