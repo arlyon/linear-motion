@@ -1,0 +1,69 @@
+[workspace]
+# Allow release-plz to work with uncommitted changes
+allow_dirty = true
+
+# Enable changelog updates
+changelog_update = true
+
+# Enable git tag creation (needed for cargo-dist to trigger)
+git_tag_enable = true
+
+# Disable git releases since cargo-dist will handle this
+git_release_enable = false
+
+# Enable publishing to crates.io
+publish = true
+
+# Configure release behavior
+release_always = false  # Only release when merging release PRs
+
+# Configure PR settings
+pr_labels = ["release"]
+pr_draft = false
+
+# Configure semver checking
+semver_check = true
+
+[changelog]
+# Use Keep a Changelog format
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+"""
+
+body = """
+## [{{ version }}]{% if release_link %}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%}){% endif %}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor %}
+"""
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^doc", group = "Documentation" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^style", group = "Changed" },
+  { message = "^test", group = "Testing" },
+  { message = "^chore\\(release\\):", skip = true },
+  { message = "^chore", group = "Miscellaneous" },
+  { message = "^.*", group = "Other" },
+]
+
+link_parsers = [
+  { pattern = "\\(#([0-9]+)\\)", href = "https://github.com/arlyon/linear-motion/pull/$1" }
+]

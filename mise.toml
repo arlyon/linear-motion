@@ -1,0 +1,4 @@
+[tools]
+"cargo:ubi-cli" = "latest"
+rust = "latest"
+"ubi:release-plz/release-plz" = "latest"
