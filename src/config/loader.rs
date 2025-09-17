@@ -28,7 +28,7 @@ impl ConfigLoader {
         let project_dirs = ProjectDirs::from("com", "linear-motion", "linear-motion")
             .ok_or_else(|| Error::Other("Could not determine user directories".to_string()))?;
 
-        Ok(project_dirs.data_dir().join("sync-tool.db"))
+        Ok(project_dirs.data_dir().join("linear-motion.db"))
     }
 
     pub fn ensure_data_dir() -> Result<PathBuf> {
@@ -46,7 +46,7 @@ impl ConfigLoader {
 
         if !path.exists() {
             return Err(Error::Other(format!(
-                "Configuration file {} not found. Run 'sync-tool init' first.",
+                "Configuration file {} not found. Run 'linear-motion init' first.",
                 path.display()
             )));
         }
@@ -73,7 +73,7 @@ impl ConfigLoader {
 
         if !path.exists() {
             return Err(Error::Other(format!(
-                "Configuration file {} not found. Run 'sync-tool init' first.",
+                "Configuration file {} not found. Run 'linear-motion init' first.",
                 path.display()
             )));
         }

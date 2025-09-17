@@ -60,7 +60,7 @@ The **Linear-Motion Sync Tool** is a command-line microservice designed to autom
 
 * The tool MUST be configured via a `config.json` file.
 
-* An interactive `init` command (`sync-tool init`) MUST be provided to generate a template configuration file.
+* An interactive `init` command (`linear-motion init`) MUST be provided to generate a template configuration file.
 
 * The configuration MUST support:
 
@@ -104,13 +104,13 @@ The **Linear-Motion Sync Tool** is a command-line microservice designed to autom
 
 ### 5.5. CLI Commands & Operation
 
-* `sync-tool init`: Creates the `config.json` template.
+* `linear-motion init`: Creates the `config.json` template.
 
-* `sync-tool sync`: Performs a single sync run across all sources and then exits. Errors are printed inline to the console.
+* `linear-motion sync`: Performs a single sync run across all sources and then exits. Errors are printed inline to the console.
 
-* `sync-tool sync --watch`: Starts the tool as a long-running daemon for continuous background syncing.
+* `linear-motion sync --watch`: Starts the tool as a long-running daemon for continuous background syncing.
 
-* `sync-tool status`: When the daemon is running, this command communicates with it via IPC to display the current state of all tracked issues and any associated errors from the `fjall` status table.
+* `linear-motion status`: When the daemon is running, this command communicates with it via IPC to display the current state of all tracked issues and any associated errors from the `fjall` status table.
 
 ## 6. Non-Functional Requirements
 
@@ -141,7 +141,7 @@ participant Linear\_API
 participant Motion\_API
 participant Fjall\_DB
 
-Note over CLI: User runs `sync-tool sync --watch`
+Note over CLI: User runs `linear-motion sync --watch`
 CLI->>Daemon: Start background process
 
 Daemon->>Linear_API: Fetch assigned issues (Initial Sync)

@@ -31,7 +31,7 @@
       "component": "Configuration",
       "description": "Tool must be configured via a single `config.json` file.",
       "acceptanceCriteria": [
-        "A `sync-tool init` command exists and generates a valid JSON template.",
+        "A `linear-motion init` command exists and generates a valid JSON template.",
         "The tool correctly parses global and per-source settings."
       ]
     },

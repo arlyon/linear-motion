@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "sync-tool")]
+#[command(name = "linear-motion")]
 #[command(about = "Linear-Motion sync tool for automating task synchronization")]
 #[command(version = "1.0")]
 pub struct Cli {
@@ -43,7 +43,7 @@ pub enum Commands {
             short,
             long,
             help = "Daemon PID file path",
-            default_value = ".sync-tool.pid"
+            default_value = ".linear-motion.pid"
         )]
         pid_file: String,
 

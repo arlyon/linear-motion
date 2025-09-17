@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| Error::Other(format!("Failed to set tracing subscriber: {}", e)))?;
 
-    info!("Starting sync-tool");
+    info!("Starting linear-motion");
 
     match cli.command {
         Commands::Init { output, force } => {
