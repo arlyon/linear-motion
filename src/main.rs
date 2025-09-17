@@ -24,7 +24,11 @@ async fn main() -> Result<()> {
         Commands::Init { output, force } => {
             handle_init(output.as_deref(), force).await?;
         }
-        Commands::Sync { watch, pid_file, force } => {
+        Commands::Sync {
+            watch,
+            pid_file,
+            force,
+        } => {
             handle_sync(cli.config.as_deref(), watch, &pid_file, force).await?;
         }
         Commands::Status => {
@@ -142,7 +146,12 @@ async fn handle_init(output: Option<&str>, force: bool) -> Result<()> {
     Ok(())
 }
 
-async fn handle_sync(config_path: Option<&str>, watch: bool, pid_file: &str, force: bool) -> Result<()> {
+async fn handle_sync(
+    config_path: Option<&str>,
+    watch: bool,
+    pid_file: &str,
+    force: bool,
+) -> Result<()> {
     use linear_motion::config::ConfigLoader;
     use linear_motion::sync::orchestrator::SyncOrchestrator;
     use std::fs;
@@ -176,10 +185,7 @@ async fn handle_sync(config_path: Option<&str>, watch: bool, pid_file: &str, for
         println!("💾 Database: {:?}", config.database_path());
         println!("⚠️  Daemon functionality not yet implemented");
     } else {
-        info!("Running one-time sync");
-        println!("🔄 Running one-time sync...");
-        println!("📊 {} sync sources configured", config.sync_sources.len());
-        println!("💾 Database: {:?}", config.database_path());
+        tracing::debug!("running one-time sync...");
 
         // Initialize and run sync orchestrator
         let orchestrator = SyncOrchestrator::new(&config).await?;

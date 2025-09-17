@@ -184,8 +184,8 @@ impl LinearClient {
         }
 
         let response: ViewerResponse = self.execute_query(query, None).await?;
-        info!(
-            "Connected to Linear as: {} ({})",
+        debug!(
+            "connected to Linear as: {} ({})",
             response.viewer.name, response.viewer.email
         );
 
@@ -351,7 +351,7 @@ impl LinearClient {
             })
             .collect();
 
-        info!("Found {} assigned issues", issues.len());
+        debug!("Found {} assigned issues", issues.len());
         Ok(issues)
     }
 
@@ -489,7 +489,7 @@ impl LinearClient {
                 message: "Label creation succeeded but no label returned".to_string(),
             })?;
 
-        info!("Created label '{}' with ID: {:?}", label.name, label.id);
+        debug!("Created label '{}' with ID: {:?}", label.name, label.id);
         Ok(label.id.expect("id should be here"))
     }
 

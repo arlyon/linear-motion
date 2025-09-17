@@ -57,9 +57,9 @@ impl ConfigLoader {
         // Validate the configuration
         config.validate()?;
 
-        info!("Configuration loaded successfully from {}", path.display());
+        debug!("configuration loaded successfully from {}", path.display());
         debug!(
-            "Config: {} sync sources, database: {:?}",
+            "config: {} sync sources, database: {:?}",
             config.sync_sources.len(),
             config.database_path()
         );

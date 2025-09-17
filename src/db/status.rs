@@ -51,7 +51,7 @@ impl StatusStore {
         let source_stats =
             keyspace.open_partition("source_stats", fjall::PartitionCreateOptions::default())?;
 
-        info!("Status tracking store initialized");
+        debug!("status tracking store initialized");
 
         Ok(Self {
             keyspace,

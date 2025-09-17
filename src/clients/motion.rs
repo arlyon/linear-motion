@@ -1,11 +1,9 @@
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use governor::{Quota, RateLimiter};
-use reqwest::{
-    header::{HeaderMap, HeaderValue},
-};
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
@@ -117,8 +115,7 @@ pub struct MotionTask {
     pub name: String,
     pub description: Option<String>,
     pub assignee_id: Option<String>,
-    #[serde(rename = "project")]
-    pub project_id: Option<String>,
+    pub project: Option<MotionProject>,
     pub priority: Option<String>, // "ASAP", "HIGH", "MEDIUM", "LOW"
     #[serde(rename = "dueDate")]
     pub due_date: Option<DateTime<Utc>>,
@@ -136,6 +133,25 @@ pub struct MotionTask {
     pub assignees: Option<Vec<MotionUser>>,
     #[serde(rename = "autoScheduled")]
     pub auto_scheduled: Option<AutoScheduled>,
+    pub chunks: Option<Vec<TaskChunk>>,
+    #[serde(rename = "parentRecurringTaskId")]
+    pub parent_recurring_task_id: Option<String>,
+    #[serde(rename = "deadlineType")]
+    pub deadline_type: Option<String>,
+    #[serde(rename = "startOn")]
+    pub start_on: Option<String>,
+    #[serde(rename = "scheduledStart")]
+    pub scheduled_start: Option<DateTime<Utc>>,
+    #[serde(rename = "scheduledEnd")]
+    pub scheduled_end: Option<DateTime<Utc>>,
+    #[serde(rename = "schedulingIssue")]
+    pub scheduling_issue: Option<bool>,
+    #[serde(rename = "lastInteractedTime")]
+    pub last_interacted_time: Option<DateTime<Utc>>,
+    #[serde(rename = "completedTime")]
+    pub completed_time: Option<DateTime<Utc>>,
+    #[serde(rename = "customFieldValues")]
+    pub custom_field_values: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +169,33 @@ pub struct MotionUser {
     pub id: String,
     pub name: String,
     pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MotionProject {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: String,
+    #[serde(rename = "createdTime")]
+    pub created_time: Option<DateTime<Utc>>,
+    #[serde(rename = "updatedTime")]
+    pub updated_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskChunk {
+    pub id: String,
+    pub duration: u32,
+    #[serde(rename = "scheduledStart")]
+    pub scheduled_start: Option<DateTime<Utc>>,
+    #[serde(rename = "scheduledEnd")]
+    pub scheduled_end: Option<DateTime<Utc>>,
+    #[serde(rename = "completedTime")]
+    pub completed_time: Option<DateTime<Utc>>,
+    #[serde(rename = "isFixed")]
+    pub is_fixed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,14 +244,16 @@ impl MotionClient {
         let mut headers = HeaderMap::new();
         headers.insert("X-API-Key", HeaderValue::from_str(&api_key)?);
 
-        let base_client = reqwest::Client::builder().default_headers(headers).build()?;
-        
+        let base_client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()?;
+
         // Configure exponential backoff retry policy
         // Start with 10 seconds as requested, with exponential backoff
         let retry_policy = ExponentialBackoff::builder()
             .retry_bounds(
-                std::time::Duration::from_secs(10),  // Start with 10 seconds as requested
-                std::time::Duration::from_secs(60),  // Cap at 60 seconds
+                std::time::Duration::from_secs(10), // Start with 10 seconds as requested
+                std::time::Duration::from_secs(60), // Cap at 60 seconds
             )
             .build_with_max_retries(3);
 
@@ -236,18 +281,20 @@ impl MotionClient {
         Ok(())
     }
 
-
     async fn make_request<T: for<'de> Deserialize<'de>>(&self, endpoint: &str) -> Result<T> {
         self.rate_limit().await?;
 
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
         debug!("Making Motion API request: GET {}", url);
 
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            Error::MotionApi {
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| Error::MotionApi {
                 message: format!("Request failed: {}", e),
-            }
-        })?;
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -276,17 +323,21 @@ impl MotionClient {
         self.rate_limit().await?;
 
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
-        info!(
+        debug!(
             "Making Motion API request: POST {} {:?}",
             url,
             serde_json::to_string(&body)
         );
 
-        let response = self.client.post(&url).json(body).send().await.map_err(|e| {
-            Error::MotionApi {
+        let response = self
+            .client
+            .post(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| Error::MotionApi {
                 message: format!("Request failed: {}", e),
-            }
-        })?;
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -325,11 +376,15 @@ impl MotionClient {
         let url = format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'));
         debug!("Making Motion API request: PATCH {}", url);
 
-        let response = self.client.patch(&url).json(body).send().await.map_err(|e| {
-            Error::MotionApi {
+        let response = self
+            .client
+            .patch(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| Error::MotionApi {
                 message: format!("Request failed: {}", e),
-            }
-        })?;
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -346,7 +401,7 @@ impl MotionClient {
 
     pub async fn get_current_user(&self) -> Result<MotionUser> {
         let user: MotionUser = self.make_request("users/me").await?;
-        info!("Connected to Motion as: {} ({})", user.name, user.email);
+        debug!("connected to Motion as: {} ({})", user.name, user.email);
         Ok(user)
     }
 
@@ -418,7 +473,7 @@ impl MotionClient {
                 .expect("workspace"),
             description: task.description.clone(),
             assignee_id: task.assignee_id.clone(),
-            project_id: task.project_id.clone(),
+            project_id: task.project.as_ref().map(|p| p.id.clone()),
             priority: task.priority.clone(),
             due_date: task.due_date,
             duration: task.duration.clone(),
@@ -558,7 +613,7 @@ impl MotionClient {
         };
 
         let label: MotionLabel = self.make_post_request("labels", &request).await?;
-        info!("Created Motion label: {} (ID: {})", label.name, label.id);
+        debug!("Created Motion label: {} (ID: {})", label.name, label.id);
         Ok(label)
     }
 
@@ -579,7 +634,7 @@ impl MotionClient {
         }
 
         // If it doesn't exist, create it
-        info!(
+        debug!(
             "Label '{}' does not exist in workspace {}, creating it",
             label_name, workspace_id
         );

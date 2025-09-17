@@ -28,14 +28,14 @@ impl SyncOrchestrator {
     }
 
     pub async fn run_full_sync(&self, config: &AppConfig, force_update: bool) -> Result<()> {
-        info!(
-            "Starting full sync for {} sources",
+        debug!(
+            "starting full sync for {} sources",
             config.sync_sources.len()
         );
 
         // Test Motion connection first
         match self.motion_client.get_current_user().await {
-            Ok(user) => info!("✅ Connected to Motion as: {}", user.name),
+            Ok(_) => {}
             Err(e) => {
                 error!("❌ Failed to connect to Motion: {}", e);
                 return Err(e);
@@ -55,9 +55,14 @@ impl SyncOrchestrator {
                 let global_rules = config.global_sync_rules.clone();
 
                 async move {
-                    let result =
-                        Self::sync_source(database.clone(), motion_client, &source, &global_rules, force_update)
-                            .await;
+                    let result = Self::sync_source(
+                        database.clone(),
+                        motion_client,
+                        &source,
+                        &global_rules,
+                        force_update,
+                    )
+                    .await;
                     (source.name.clone(), result)
                 }
             })
@@ -67,9 +72,9 @@ impl SyncOrchestrator {
 
         for (source_name, result) in results {
             match result {
-                Ok(count) => info!("✅ Synced {} issues from source '{}'", count, source_name),
+                Ok(count) => debug!("synced {} issues from '{}'", count, source_name),
                 Err(e) => {
-                    error!("❌ Failed to sync source '{}': {}", source_name, e);
+                    error!("failed to sync from '{}': {}", source_name, e);
                     // Continue with other sources even if one fails
                     self.database
                         .status
@@ -95,6 +100,8 @@ impl SyncOrchestrator {
         Ok(())
     }
 
+    // write source name to span
+    #[tracing::instrument(skip(database, motion_client, source, global_rules), fields(source = source.name.as_str()))]
     async fn sync_source(
         database: Arc<SyncDatabase>,
         motion_client: Arc<MotionClient>,
@@ -102,7 +109,7 @@ impl SyncOrchestrator {
         global_rules: &SyncRules,
         force_update: bool,
     ) -> Result<usize> {
-        info!("Syncing source: {}", source.name);
+        debug!("syncing source: {}", source.name);
 
         // Get effective sync rules for this source
         let sync_rules = source.effective_sync_rules(global_rules);
@@ -112,7 +119,7 @@ impl SyncOrchestrator {
 
         // Test Linear connection
         match linear_client.get_viewer().await {
-            Ok(user) => info!("✅ Connected to Linear as: {}", user.name),
+            Ok(_) => {}
             Err(e) => {
                 error!("❌ Failed to connect to Linear: {}", e);
                 return Err(e);
@@ -139,7 +146,7 @@ impl SyncOrchestrator {
             }
             None => {
                 info!(
-                    "No projects specified for source '{}' - fetching all assigned issues",
+                    "no projects specified for source '{}' - fetching all assigned issues",
                     source.name
                 );
             }
@@ -148,7 +155,7 @@ impl SyncOrchestrator {
         // Fetch assigned issues from Linear
         let issues = linear_client.get_assigned_issues(projects).await?;
         info!("Found {} assigned issues in Linear", issues.len());
-        info!("found issues: {:?}", issues);
+        debug!("found issues: {:?}", issues);
 
         let mut synced_count = 0;
 
@@ -183,19 +190,19 @@ impl SyncOrchestrator {
                         // Check if the issue has been updated since last sync or if force update is enabled
                         if force_update || Self::issue_needs_update(&mapping, issue)? {
                             if force_update {
-                                info!(
-                                    "Force update enabled, updating Motion task for {}",
+                                debug!(
+                                    "force update enabled, updating Motion task for {}",
                                     issue.identifier
                                 );
                             } else {
-                                info!(
-                                    "Issue {} has changes, updating Motion task",
+                                debug!(
+                                    "issue {} has changes, updating Motion task",
                                     issue.identifier
                                 );
                             }
                             // Continue with update process
                         } else {
-                            debug!("Issue {} unchanged, skipping", issue.identifier);
+                            debug!("issue {} unchanged, skipping", issue.identifier);
                             continue;
                         }
                     }
@@ -270,7 +277,13 @@ impl SyncOrchestrator {
                 }
             } else {
                 // Create new Motion task
-                match Self::create_motion_task_from_issue(&motion_client, issue, &sync_rules, &source.name).await
+                match Self::create_motion_task_from_issue(
+                    &motion_client,
+                    issue,
+                    &sync_rules,
+                    &source.name,
+                )
+                .await
                 {
                     Ok(motion_task) => {
                         let motion_task_id = motion_task.id.clone().unwrap_or_default();
@@ -321,69 +334,82 @@ impl SyncOrchestrator {
     }
 
     /// Check for completed tasks in Motion and tag corresponding Linear issues
+    #[tracing::instrument(skip(self, config))]
     pub async fn sync_completed_tasks(&self, config: &AppConfig) -> Result<()> {
         info!("Checking for completed Motion tasks to tag in Linear");
 
         // Get Motion workspaces
         let workspaces = self.motion_client.list_workspaces().await?;
-        
+
         for workspace in &workspaces {
             info!("Checking workspace: {}", workspace.name);
-            
+
             // Get completed tasks from this workspace
-            let completed_tasks = self.motion_client.list_completed_tasks(&workspace.id).await?;
-            
+            let completed_tasks = self
+                .motion_client
+                .list_completed_tasks(&workspace.id)
+                .await?;
+
+            debug!(
+                "Found {} completed tasks in workspace {}",
+                completed_tasks.len(),
+                workspace.name
+            );
+
             for task in &completed_tasks {
                 // Skip tasks without IDs or without the linear-sync label
                 let task_id = match &task.id {
                     Some(id) => id,
                     None => continue,
                 };
-                
+
                 // Check if this task has the linear-sync label
-                let has_linear_label = task.labels
+                let has_linear_label = task
+                    .labels
                     .as_ref()
                     .map(|labels| labels.iter().any(|l| l.name == "linear-sync"))
                     .unwrap_or(false);
-                    
+
                 if !has_linear_label {
                     continue;
                 }
-                
+
                 // Find the corresponding Linear issue in our database
-                if let Some(mapping) = self.database
+                if let Some(mapping) = self
+                    .database
                     .mappings
                     .get_mapping_by_motion_id(task_id)
                     .await?
                 {
                     // Check if this issue is already tagged to avoid re-tagging
-                    if let Some(sync_source_config) = config.sync_sources
+                    if let Some(sync_source_config) = config
+                        .sync_sources
                         .iter()
                         .find(|s| s.name == mapping.sync_source)
                     {
                         let linear_client = crate::clients::linear::LinearClient::new(
-                            sync_source_config.linear_api_key.clone()
+                            sync_source_config.linear_api_key.clone(),
                         )?;
-                        
+
                         let completion_tag = &config.global_sync_rules.completed_linear_tag;
-                        
+
                         // Check if issue already has the completion tag
                         if linear_client
                             .check_issue_has_label(&mapping.linear_issue_id, completion_tag)
                             .await?
                         {
                             debug!(
-                                "Linear issue {} already has completion tag, skipping", 
+                                "Linear issue {} already has completion tag, skipping",
                                 mapping.linear_issue_id
                             );
                             continue;
                         }
-                        
+
                         info!(
                             "Motion task {} completed, tagging Linear issue {}",
                             task_id, mapping.linear_issue_id
                         );
-                        
+
                         // Add the completion tag to the Linear issue
                         match linear_client
                             .add_label_to_issue(&mapping.linear_issue_id, completion_tag)
@@ -394,13 +420,13 @@ impl SyncOrchestrator {
                                     "✅ Successfully tagged Linear issue {} with '{}'",
                                     mapping.linear_issue_id, completion_tag
                                 );
-                                
+
                                 // Remove the mapping from the database as per PRD
                                 self.database
                                     .mappings
                                     .remove_mapping(&mapping.sync_source, &mapping.linear_issue_id)
                                     .await?;
-                                    
+
                                 info!(
                                     "🗑️  Removed mapping for completed task: {} -> {}",
                                     mapping.linear_issue_id, task_id
@@ -417,7 +443,7 @@ impl SyncOrchestrator {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -427,8 +453,11 @@ impl SyncOrchestrator {
         sync_source_name: &str,
     ) -> Option<String> {
         let base_description = issue.description.as_ref().cloned().unwrap_or_default();
-        let linear_link = format!("https://linear.app/{}/issue/{}", sync_source_name, issue.identifier);
-        
+        let linear_link = format!(
+            "https://linear.app/{}/issue/{}",
+            sync_source_name, issue.identifier
+        );
+
         if base_description.is_empty() {
             Some(format!("Linear: {}", linear_link))
         } else {
@@ -524,7 +553,7 @@ impl SyncOrchestrator {
         let updated_task = motion_client
             .update_task(motion_task_id, &motion_task)
             .await?;
-        info!(
+        debug!(
             "Updated Motion task: {} ({})",
             updated_task.name, motion_task_id
         );
