@@ -575,6 +575,34 @@ impl MotionClient {
         Ok(updated_task)
     }
 
+    pub async fn delete_task(&self, task_id: &str) -> Result<()> {
+        debug!("Deleting Motion task: {}", task_id);
+        
+        self.rate_limit().await?;
+
+        let url = format!("{}/tasks/{}", self.base_url, task_id);
+        let response = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .map_err(|e| Error::MotionApi {
+                message: format!("Request failed: {}", e),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await?;
+            error!("Motion API error: {} - {}", status, text);
+            return Err(Error::MotionApi {
+                message: format!("HTTP {}: {}", status, text),
+            });
+        }
+
+        info!("Successfully deleted Motion task: {}", task_id);
+        Ok(())
+    }
+
     pub async fn list_labels(&self, workspace_id: &str) -> Result<Vec<MotionLabel>> {
         let endpoint = format!("labels?workspaceId={}", workspace_id);
         let response: LabelListResponse = self.make_request(&endpoint).await?;

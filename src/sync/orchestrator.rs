@@ -87,6 +87,12 @@ impl SyncOrchestrator {
         // Flush database changes
         self.database.flush().await?;
 
+        // Clean up Motion tasks for Linear issues that are no longer assigned
+        if let Err(e) = self.cleanup_unassigned_tasks(config).await {
+            error!("Failed to cleanup unassigned tasks: {}", e);
+            // Don't fail the whole sync if cleanup fails
+        }
+
         // Check for completed Motion tasks and tag corresponding Linear issues
         if let Err(e) = self.sync_completed_tasks(config).await {
             error!("Failed to sync completed tasks: {}", e);
@@ -444,6 +450,121 @@ impl SyncOrchestrator {
             }
         }
 
+        Ok(())
+    }
+
+    /// Clean up Motion tasks for Linear issues that are no longer assigned to the user
+    #[tracing::instrument(skip(self, config))]
+    pub async fn cleanup_unassigned_tasks(&self, config: &AppConfig) -> Result<()> {
+        info!("Cleaning up Motion tasks for unassigned Linear issues");
+
+        for source in &config.sync_sources {
+            debug!("Checking for orphaned tasks from source: {}", source.name);
+
+            // Get all mappings for this source
+            let existing_mappings = self
+                .database
+                .mappings
+                .list_mappings_by_source(&source.name)
+                .await?;
+
+            if existing_mappings.is_empty() {
+                debug!("No existing mappings found for source: {}", source.name);
+                continue;
+            }
+
+            // Get currently assigned issues from Linear
+            let linear_client = LinearClient::new(source.linear_api_key.clone())?;
+            let current_issues = match linear_client.get_assigned_issues(source.projects.clone()).await {
+                Ok(issues) => issues,
+                Err(e) => {
+                    error!("Failed to fetch current issues for source '{}': {}", source.name, e);
+                    continue; // Skip this source if we can't fetch current issues
+                }
+            };
+
+            // Create a set of currently assigned issue IDs for quick lookup
+            let current_issue_ids: std::collections::HashSet<String> = 
+                current_issues.iter().map(|issue| issue.id.clone()).collect();
+
+            // Find orphaned mappings (exist in DB but issue is no longer assigned)
+            let orphaned_mappings: Vec<&crate::db::mapping::TaskMapping> = existing_mappings
+                .iter()
+                .filter(|mapping| !current_issue_ids.contains(&mapping.linear_issue_id))
+                .collect();
+
+            info!(
+                "Found {} orphaned mappings for source '{}' (out of {} total mappings)",
+                orphaned_mappings.len(),
+                source.name,
+                existing_mappings.len()
+            );
+
+            // Delete Motion tasks and remove mappings for orphaned items
+            for mapping in orphaned_mappings {
+                if let Some(motion_task_id) = &mapping.motion_task_id {
+                    debug!(
+                        "Deleting Motion task {} for unassigned Linear issue {}",
+                        motion_task_id, mapping.linear_issue_id
+                    );
+
+                    // Delete the Motion task
+                    match self.motion_client.delete_task(motion_task_id).await {
+                        Ok(()) => {
+                            info!(
+                                "✅ Deleted Motion task {} for unassigned issue {}",
+                                motion_task_id, mapping.linear_issue_id
+                            );
+
+                            // Remove the mapping from the database
+                            if let Err(e) = self
+                                .database
+                                .mappings
+                                .remove_mapping(&source.name, &mapping.linear_issue_id)
+                                .await
+                            {
+                                error!(
+                                    "Failed to remove mapping for {}: {}",
+                                    mapping.linear_issue_id, e
+                                );
+                            } else {
+                                debug!(
+                                    "Removed mapping for unassigned issue: {}",
+                                    mapping.linear_issue_id
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Failed to delete Motion task {} for unassigned issue {}: {}",
+                                motion_task_id, mapping.linear_issue_id, e
+                            );
+                            // Don't remove the mapping if we couldn't delete the Motion task
+                        }
+                    }
+                } else {
+                    // Mapping exists but no Motion task was created yet - just remove the mapping
+                    debug!(
+                        "Removing orphaned mapping without Motion task for issue: {}",
+                        mapping.linear_issue_id
+                    );
+
+                    if let Err(e) = self
+                        .database
+                        .mappings
+                        .remove_mapping(&source.name, &mapping.linear_issue_id)
+                        .await
+                    {
+                        error!(
+                            "Failed to remove orphaned mapping for {}: {}",
+                            mapping.linear_issue_id, e
+                        );
+                    }
+                }
+            }
+        }
+
+        info!("Cleanup of unassigned tasks completed");
         Ok(())
     }
 
