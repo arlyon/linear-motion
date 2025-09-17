@@ -63,6 +63,10 @@ Download the latest binary from the [GitHub releases page](https://github.com/ar
    linear-motion status
    ```
 
+6. (coming soon) **Podman Quadlet**:
+   Run the daemon under podman + systemd with auto-updates.
+
+
 ## Configuration
 
 The tool uses a `config.json` file for configuration. Here's the structure:
@@ -147,10 +151,10 @@ The tool supports multiple estimation systems:
 
 ## Commands
 
-- `linear-motion init` - Generate configuration template
-- `linear-motion sync` - Run one-time sync
-- `linear-motion sync --watch` - Start continuous background sync
-- `linear-motion status` - Show current sync status and errors
+- [x] `linear-motion init` - Generate configuration template
+- [x] `linear-motion sync` - Run one-time sync
+- [ ] `linear-motion sync --watch` - Start continuous background sync
+- [ ] `linear-motion status` - Show current sync status and errors
 
 ## Use Cases
 
