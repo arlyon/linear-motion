@@ -66,6 +66,77 @@ Download the latest binary from the [GitHub releases page](https://github.com/ar
 6. (coming soon) **Podman Quadlet**:
    Run the daemon under podman + systemd with auto-updates.
 
+## Running Automatically with systemd
+
+To run the sync command periodically as a specific user on a modern Fedora system, the best practice is to create a `systemd` user service and a corresponding timer unit. This is the modern replacement for user-level cron jobs.
+
+This process involves creating two files in your user's configuration directory.
+
+### Step 1: Create the systemd Service File
+
+This file tells `systemd` *what* command to run.
+
+1. First, ensure the target directory exists:
+   ```bash
+   mkdir -p ~/.config/systemd/user/
+   ```
+
+2. Create the service file:
+   ```bash
+   nano ~/.config/systemd/user/linear-motion-sync.service
+   ```
+
+3. Add the following content:
+   ```ini
+   [Unit]
+   Description=Sync Linear Motion data
+
+   [Service]
+   Type=oneshot
+   ExecStart=/linear-motion sync
+   ```
+
+   - `Description`: A human-readable description of what the service does
+   - `Type=oneshot`: Suitable for a script that starts, performs a single task, and then exits
+   - `ExecStart`: The full, absolute path to the command you want to run
+
+### Step 2: Create the systemd Timer File
+
+This file tells `systemd` *when* to run the service defined above.
+
+1. Create the timer file (must have the same name as the service file, but with a `.timer` extension):
+   ```bash
+   nano ~/.config/systemd/user/linear-motion-sync.timer
+   ```
+
+2. Add the following content:
+   ```ini
+   [Unit]
+   Description=Run Linear Motion sync once an hour
+
+   [Timer]
+   OnCalendar=hourly
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+   - `OnCalendar=hourly`: Runs the job at the top of every hour (e.g., 1:00, 2:00, 3:00)
+   - `Persistent=true`: If the system was powered off when the job was supposed to run, it will run as soon as possible after the next boot/login
+   - `WantedBy=timers.target`: Tells `systemd` how to enable the timer so it starts automatically when you log in
+
+### Step 3: Enable and Start the Timer
+
+**Important:** Because these are *user* services, you must use the `--user` flag with `systemctl`. Do not use `sudo`.
+
+```bash
+# Reload the systemd user daemon to pick up the new files
+systemctl --user daemon-reload
+
+# Enable and start the timer
+systemctl --user enable --now linear-motion-sync.timer
+```
 
 ## Configuration
 
