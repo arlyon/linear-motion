@@ -2,3 +2,4 @@
 "cargo:ubi-cli" = "latest"
 rust = "latest"
 "github:release-plz/release-plz" = "latest"
+"cargo:cargo-dist" = "latest"
