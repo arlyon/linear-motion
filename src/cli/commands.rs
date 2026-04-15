@@ -57,6 +57,21 @@ pub enum Commands {
     /// Stop running daemon
     Stop,
 
+    /// Fetch tasks from Motion
+    Tasks {
+        #[arg(short, long, help = "Output waybar JSON format (current + next task)")]
+        waybar: bool,
+    },
+
+    /// Complete a Motion task
+    Complete {
+        #[arg(long, help = "Motion task ID to mark as completed", conflicts_with = "current")]
+        id: Option<String>,
+
+        #[arg(long, help = "Complete the current task (as last shown by `tasks --waybar`)", conflicts_with = "id")]
+        current: bool,
+    },
+
     /// List all tracked issues and metadata in local database
     List {
         #[arg(short, long, help = "Show detailed information for each entry")]

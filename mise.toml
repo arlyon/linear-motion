@@ -1,4 +1,4 @@
 [tools]
 "cargo:ubi-cli" = "latest"
 rust = "latest"
-"ubi:release-plz/release-plz" = "latest"
+"github:release-plz/release-plz" = "latest"

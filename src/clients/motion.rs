@@ -539,6 +539,16 @@ impl MotionClient {
         Ok(task)
     }
 
+    pub async fn list_tasks(&self, workspace_id: &str) -> Result<Vec<MotionTask>> {
+        let endpoint = format!("tasks?workspaceId={}", workspace_id);
+        let response: TaskListResponse = self.make_request(&endpoint).await?;
+        Ok(response
+            .tasks
+            .into_iter()
+            .filter(|t| !t.completed.unwrap_or(false))
+            .collect())
+    }
+
     pub async fn list_completed_tasks(&self, workspace_id: &str) -> Result<Vec<MotionTask>> {
         let endpoint = format!("tasks?workspaceId={}&includeAllStatuses=true", workspace_id);
         let response: TaskListResponse = self.make_request(&endpoint).await?;

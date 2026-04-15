@@ -37,6 +37,13 @@ async fn main() -> Result<()> {
         Commands::Stop => {
             handle_stop().await?;
         }
+        Commands::Complete { id, current } => {
+            let task_id = if current { None } else { id.as_deref() };
+            handle_complete(cli.config.as_deref(), task_id).await?;
+        }
+        Commands::Tasks { waybar } => {
+            handle_tasks(cli.config.as_deref(), waybar).await?;
+        }
         Commands::List { verbose, source } => {
             handle_list(cli.config.as_deref(), verbose, source.as_deref()).await?;
         }
@@ -214,6 +221,130 @@ async fn handle_stop() -> Result<()> {
     // TODO: Implement daemon shutdown via IPC or signal
     println!("🛑 Stop functionality not yet implemented");
     println!("⚠️  Will send shutdown signal to daemon when implemented");
+    Ok(())
+}
+
+fn current_task_state_path() -> std::path::PathBuf {
+    std::env::var("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        .join("linear-motion-current")
+}
+
+async fn handle_complete(config_path: Option<&str>, task_id: Option<&str>) -> Result<()> {
+    use linear_motion::clients::motion::MotionClient;
+    use linear_motion::config::ConfigLoader;
+
+    let id = match task_id {
+        Some(id) => id.to_string(),
+        None => std::fs::read_to_string(current_task_state_path())
+            .map(|s| s.trim().to_string())
+            .map_err(|_| Error::Other("No task ID given and no current task state found. Run `tasks --waybar` first.".to_string()))?,
+    };
+
+    let config_path = match config_path {
+        Some(path) => path.to_string(),
+        None => ConfigLoader::get_default_config_path()?
+            .to_string_lossy()
+            .to_string(),
+    };
+    let config = ConfigLoader::load_from_file(&config_path).await?;
+    let client = MotionClient::new(config.motion_api_key.clone())?;
+
+    client.mark_task_completed(&id).await?;
+    Ok(())
+}
+
+async fn handle_tasks(config_path: Option<&str>, waybar: bool) -> Result<()> {
+    use chrono::Utc;
+    use linear_motion::clients::motion::MotionClient;
+    use linear_motion::config::ConfigLoader;
+
+    let config_path = match config_path {
+        Some(path) => path.to_string(),
+        None => ConfigLoader::get_default_config_path()?
+            .to_string_lossy()
+            .to_string(),
+    };
+    let config = ConfigLoader::load_from_file(&config_path).await?;
+    let client = MotionClient::new(config.motion_api_key.clone())?;
+
+    // Find the preferred workspace (private workspace first)
+    let workspaces = client.list_workspaces().await?;
+    let workspace = workspaces
+        .iter()
+        .find(|w| w.workspace_type == "INDIVIDUAL")
+        .or_else(|| workspaces.first())
+        .ok_or_else(|| Error::Other("No Motion workspaces found".to_string()))?;
+
+    let mut tasks = client.list_tasks(&workspace.id).await?;
+
+    // Sort by scheduled start, tasks without a scheduled start go last
+    tasks.sort_by(|a, b| {
+        match (a.scheduled_start, b.scheduled_start) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+
+    if waybar {
+        let now = Utc::now();
+
+        // Current task: in-progress (scheduledStart <= now < scheduledEnd), else next upcoming
+        let current = tasks
+            .iter()
+            .find(|t| {
+                matches!(
+                    (t.scheduled_start, t.scheduled_end),
+                    (Some(start), Some(end)) if start <= now && now < end
+                )
+            })
+            .or_else(|| tasks.iter().find(|t| t.scheduled_start.map_or(false, |s| s > now)))
+            .or_else(|| tasks.first());
+
+        let next = current.and_then(|c| {
+            tasks
+                .iter()
+                .skip_while(|t| t.id != c.id)
+                .nth(1)
+        });
+
+        let text = current
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "No tasks".to_string());
+
+        let tooltip = next
+            .map(|t| format!("Next: {}", t.name))
+            .unwrap_or_else(|| "No upcoming tasks".to_string());
+
+        let class = current
+            .and_then(|t| t.priority.as_deref())
+            .map(|p| p.to_lowercase())
+            .unwrap_or_else(|| "none".to_string());
+
+        let alt = current
+            .and_then(|t| t.id.as_deref())
+            .unwrap_or_default();
+
+        // Write the current task ID to the state file so `complete` can use it
+        // without re-fetching (avoids TOCTOU between display and click)
+        let _ = std::fs::write(current_task_state_path(), alt);
+
+        println!(
+            "{}",
+            serde_json::json!({
+                "text": text,
+                "alt": alt,
+                "tooltip": tooltip,
+                "class": class,
+            })
+        );
+    } else {
+        println!("{}", serde_json::to_string_pretty(&tasks)?);
+    }
+
     Ok(())
 }
 
