@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/arlyon/linear-motion/compare/v0.2.0...v0.2.1) - 2026-04-15
+
+### Other
+- update dist
+
 ## [0.2.0](https://github.com/arlyon/linear-motion/compare/v0.1.1...v0.2.0) - 2026-04-15
 
 ### Other
